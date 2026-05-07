@@ -1,0 +1,22 @@
+# Copy this file to config.yaml and fill in your values.
+# config.yaml is gitignored — never commit credentials.
+
+unifi:
+  host: "192.168.1.1"        # IP or hostname of your UniFi controller / UDM
+  port: 443                   # 443 for UDM/UDM-Pro, 8443 for standalone Network Application
+  username: "admin"
+  password: "your-password"
+  # site: "default"           # optional — if omitted, you will be prompted to choose after login
+  verify_ssl: false           # set true if you have a valid cert; false for self-signed
+
+report:
+  site_name: "My Network"     # display name shown in the report header
+  output_dir: "reports"       # directory where HTML reports are saved
+  timezone: "America/Chicago" # your local timezone (used for event timestamps)
+
+  # Thresholds that trigger recommendations
+  thresholds:
+    ap_retry_pct: 5.0         # AP TX retry % above this is flagged
+    ap_reboot_days: 7         # AP reboots within this many days are flagged
+    client_bandwidth_gb: 50   # clients above this GB/week appear in top consumers
+    switch_error_rate: 100    # switch port error count above this is flagged
