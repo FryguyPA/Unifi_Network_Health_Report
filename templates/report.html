@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UniFi Network Report — {{ site_name }}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a2e; }
+
+  .header {
+    background: linear-gradient(135deg, #0c1a3a 0%, #1a3a6b 100%);
+    color: white; padding: 32px 40px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .header-left h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
+  .header-left .site { font-size: 14px; color: #7eb3ff; margin-top: 4px; }
+  .header-right { text-align: right; font-size: 13px; color: #a0bce0; }
+  .header-right strong { color: white; font-size: 15px; display: block; margin-bottom: 2px; }
+  .logo-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #7eb3ff; margin-bottom: 12px; }
+  .logo-dot { width: 10px; height: 10px; background: #0066ff; border-radius: 50%; }
+
+  .container { max-width: 1000px; margin: 0 auto; padding: 32px 20px; }
+
+  /* KPI cards */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+  .kpi-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); border-top: 3px solid transparent; }
+  .kpi-card.wan  { border-color: {% if wan_up %}#22c55e{% else %}#ef4444{% endif %}; }
+  .kpi-card.clients  { border-color: #3b82f6; }
+  .kpi-card.aps  { border-color: #8b5cf6; }
+  .kpi-card.alerts { border-color: {% if alarm_count > 0 %}#ef4444{% else %}#22c55e{% endif %}; }
+  .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: #6b7280; margin-bottom: 8px; }
+  .kpi-value { font-size: 32px; font-weight: 700; color: #111827; line-height: 1; }
+  .kpi-sub { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+
+  /* Layout */
+  .section { margin-bottom: 28px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+  .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #6b7280; border-bottom: 2px solid #f3f4f6; }
+  td { padding: 9px 12px; border-bottom: 1px solid #f3f4f6; color: #374151; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge-green  { background: #dcfce7; color: #16a34a; }
+  .badge-red    { background: #fee2e2; color: #dc2626; }
+  .badge-yellow { background: #fef3c7; color: #d97706; }
+  .badge-blue   { background: #dbeafe; color: #1d4ed8; }
+  .badge-purple { background: #ede9fe; color: #7c3aed; }
+  .badge-gray   { background: #f3f4f6; color: #6b7280; }
+
+  /* AP grid */
+  .ap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .ap-card { background: #f9fafb; border-radius: 10px; padding: 14px; border: 1px solid #e5e7eb; }
+  .ap-name { font-weight: 600; font-size: 13px; color: #111827; margin-bottom: 2px; }
+  .ap-model { font-size: 11px; color: #9ca3af; margin-bottom: 10px; }
+  .ap-stat { display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+  .ap-stat span:last-child { color: #374151; font-weight: 500; }
+  .ap-status { margin-top: 8px; }
+
+  /* Event timeline */
+  .timeline { list-style: none; }
+  .timeline li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 13px; align-items: flex-start; }
+  .timeline li:last-child { border-bottom: none; }
+  .tl-time { color: #9ca3af; min-width: 140px; font-size: 12px; padding-top: 2px; }
+  .tl-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; font-weight: 700; }
+  .tl-icon.crit { background: #fee2e2; color: #dc2626; }
+  .tl-icon.warn { background: #fef3c7; color: #d97706; }
+  .tl-icon.ok   { background: #dcfce7; color: #16a34a; }
+  .tl-icon.info { background: #dbeafe; color: #1d4ed8; }
+  .tl-body { flex: 1; color: #374151; }
+
+  /* Empty state */
+  .empty { color: #9ca3af; font-size: 13px; text-align: center; padding: 24px 0; }
+
+  .footer { text-align: center; font-size: 12px; color: #9ca3af; padding: 24px; border-top: 1px solid #e5e7eb; margin-top: 8px; }
+
+  details[open] summary span:first-child { transform: rotate(90deg); display:inline-block; }
+  details summary::-webkit-details-marker { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="logo-row"><div class="logo-dot"></div> Ubiquiti UniFi</div>
+    <h1>Network Health Report</h1>
+    <div class="site">{{ site_name }}</div>
+  </div>
+  <div class="header-right">
+    <strong>{{ generated_at }}</strong>
+    {% if controller_version != "—" %}Controller v{{ controller_version }}{% endif %}
+  </div>
+</div>
+
+<div class="container">
+
+  {# ── KPI Row ────────────────────────────────────────────── #}
+  <div class="kpi-grid">
+    <div class="kpi-card wan">
+      <div class="kpi-label">WAN Status</div>
+      <div class="kpi-value">{{ wan_status_text }}</div>
+      <div class="kpi-sub">{{ wan_connection_count }} connection{{ 's' if wan_connection_count != 1 else '' }}</div>
+    </div>
+    <div class="kpi-card clients">
+      <div class="kpi-label">Connected Clients</div>
+      <div class="kpi-value">{{ client_count }}</div>
+      <div class="kpi-sub">{{ client_wireless }} wireless &nbsp;·&nbsp; {{ client_wired }} wired &nbsp;·&nbsp; {{ client_guests }} guests</div>
+    </div>
+    <div class="kpi-card aps">
+      <div class="kpi-label">Access Points</div>
+      <div class="kpi-value">{{ aps | length }}</div>
+      <div class="kpi-sub">
+        {{ aps | selectattr("connected") | list | length }} online
+        {% set offline = aps | rejectattr("connected") | list | length %}
+        {% if offline > 0 %}&nbsp;·&nbsp; <span style="color:#ef4444">{{ offline }} offline</span>{% endif %}
+      </div>
+    </div>
+    <div class="kpi-card alerts">
+      <div class="kpi-label">Active Alarms</div>
+      <div class="kpi-value">{{ alarm_count }}</div>
+      <div class="kpi-sub">
+        {% if rec_count_high > 0 %}{{ rec_count_high }} high-priority items{% else %}No critical issues{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── Gateway + Top Clients ──────────────────────────────── #}
+  <div class="two-col section">
+    <div>
+      <div class="section-title">Gateway / WAN</div>
+      <div class="card">
+
+        {# ── Per-WAN connection rows ── #}
+        {% if wan_connections %}
+          <table>
+            <thead><tr><th>Interface</th><th>IP</th><th>ISP</th><th>Media</th><th>Avail</th><th>Latency</th><th>Uptime</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for w in wan_connections %}
+              <tr>
+                <td><strong>{{ w.name }}</strong></td>
+                <td style="font-size:12px">{{ w.ip }}</td>
+                <td style="font-size:12px">{{ w.isp if w.isp != '—' else '' }}</td>
+                <td style="font-size:12px">{{ w.media if w.media is defined and w.media != '—' else '' }}{% if w.speed_mbps is defined and w.speed_mbps %} · {{ w.speed_mbps }} M{% endif %}</td>
+                <td>{{ w.availability }}%</td>
+                <td>{{ w.latency_avg }} ms</td>
+                <td>{{ w.uptime }}</td>
+                <td>
+                  {% if w.status == 'ok' %}
+                    <span class="badge badge-green">Online</span>
+                  {% elif w.status == 'degraded' %}
+                    <span class="badge badge-yellow">Degraded</span>
+                  {% else %}
+                    <span class="badge badge-red">Down</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+
+        {# ── Gateway device stats ── #}
+        {% if gateways %}
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f3f4f6;">
+            <table>
+              <thead><tr><th>Device</th><th>CPU</th><th>Mem</th><th>Uptime</th></tr></thead>
+              <tbody>
+              {% for gw in gateways %}
+                <tr>
+                  <td><strong>{{ gw.name }}</strong><br><span style="font-size:11px;color:#9ca3af">{{ gw.model }} · v{{ gw.version }}</span></td>
+                  <td>{{ gw.cpu_pct }}%</td>
+                  <td>{{ gw.mem_pct }}%</td>
+                  <td>{{ gw.uptime }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+
+        {# ── Speedtest ── #}
+        {% if speedtest.download_mbps %}
+          <div style="margin-top:14px; padding-top:12px; border-top:1px solid #f3f4f6; display:flex; gap:24px; font-size:13px; align-items:center;">
+            <span style="color:#6b7280; font-size:11px; text-transform:uppercase; letter-spacing:.6px;">Last Speedtest</span>
+            <span>↓ <strong>{{ speedtest.download_mbps }} Mbps</strong></span>
+            <span>↑ <strong>{{ speedtest.upload_mbps }} Mbps</strong></span>
+            <span>Ping <strong>{{ speedtest.ping_ms }} ms</strong></span>
+            {% if speedtest.last_run %}<span style="color:#9ca3af; font-size:12px;">{{ speedtest.last_run }}</span>{% endif %}
+          </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Top Bandwidth Consumers</div>
+      <div class="card">
+        {% if clients.top_consumers %}
+          <table>
+            <thead><tr><th>Device</th><th>IP</th><th>Total</th><th>Net</th></tr></thead>
+            <tbody>
+            {% for c in clients.top_consumers %}
+              <tr>
+                <td>
+                  <strong>{{ c.name }}</strong>
+                  {% if c.is_guest %}<span class="badge badge-yellow" style="margin-left:4px">Guest</span>{% endif %}
+                </td>
+                <td>{{ c.ip }}</td>
+                <td>{{ c.total }}</td>
+                <td><span class="badge badge-{% if c.is_wired %}blue{% else %}purple{% endif %}">{{ c.network or ('Wired' if c.is_wired else 'WiFi') }}</span></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">No client bandwidth data available.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── WLAN + VPN ────────────────────────────────────────── #}
+  <div class="two-col section">
+    <div>
+      <div class="section-title">Wireless Networks</div>
+      <div class="card">
+        <div style="display:flex; gap:20px; margin-bottom:16px; flex-wrap:wrap;">
+          <div style="text-align:center;">
+            <div style="font-size:26px; font-weight:700; color:#111827;">{{ wlans.user_clients }}</div>
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px;">Users</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:26px; font-weight:700; color:#111827;">{{ wlans.iot_clients }}</div>
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px;">IoT</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:26px; font-weight:700; color:#111827;">{{ wlans.guest_clients }}</div>
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px;">Guests</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:26px; font-weight:700; color:{% if wlans.num_disconnected > 0 %}#ef4444{% else %}#111827{% endif %};">{{ wlans.num_disconnected }}</div>
+            <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px;">AP Issues</div>
+          </div>
+        </div>
+        {% if wlans.ssids %}
+          <table>
+            <thead><tr><th>SSID</th><th>Security</th><th>Bands</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for ssid in wlans.ssids %}
+              <tr>
+                <td><strong>{{ ssid.name }}</strong>{% if ssid.is_guest %} <span class="badge badge-yellow" style="font-size:10px;">Guest</span>{% endif %}</td>
+                <td><span class="badge badge-gray">{{ ssid.security }}</span></td>
+                <td style="font-size:12px;">{{ ssid.bands }}</td>
+                <td>{% if ssid.enabled %}<span class="badge badge-green">Enabled</span>{% else %}<span class="badge badge-gray">Disabled</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">VPN</div>
+      <div class="card">
+        {% if vpn.enabled %}
+          <div style="display:flex; gap:20px; margin-bottom:16px;">
+            <div style="text-align:center;">
+              <div style="font-size:26px; font-weight:700; color:{% if vpn.active_sessions > 0 %}#3b82f6{% else %}#111827{% endif %};">{{ vpn.active_sessions }}</div>
+              <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px;">Active</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="font-size:26px; font-weight:700; color:#111827;">{{ vpn.inactive_users }}</div>
+              <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px;">Configured</div>
+            </div>
+          </div>
+          <table>
+            <tbody>
+              <tr><td style="color:#6b7280;">Remote User VPN</td><td><span class="badge badge-green">Enabled</span></td></tr>
+              <tr><td style="color:#6b7280;">Site-to-Site VPN</td><td><span class="badge badge-{% if vpn.site_to_site %}green{% else %}gray{% endif %}">{% if vpn.site_to_site %}Enabled{% else %}Disabled{% endif %}</span></td></tr>
+              <tr><td style="color:#6b7280;">Session RX</td><td style="font-size:12px;">{{ vpn.rx_bytes }}</td></tr>
+              <tr><td style="color:#6b7280;">Session TX</td><td style="font-size:12px;">{{ vpn.tx_bytes }}</td></tr>
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty">VPN is not enabled on this site.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── Networks / VLANs ──────────────────────────────────── #}
+  <div class="section">
+    <div class="section-title">Networks &amp; VLANs</div>
+    <div class="card">
+      {% if networks %}
+        <table>
+          <thead><tr><th>Name</th><th>Type</th><th>VLAN</th><th>Subnet</th><th>DHCP</th></tr></thead>
+          <tbody>
+          {% for n in networks %}
+            <tr>
+              <td><strong>{{ n.name }}</strong></td>
+              <td>
+                {% if n.purpose == 'LAN' %}<span class="badge badge-blue">LAN</span>
+                {% elif n.purpose == 'Guest' %}<span class="badge badge-yellow">Guest</span>
+                {% elif n.purpose == 'VPN' %}<span class="badge badge-purple">VPN</span>
+                {% elif n.purpose == 'VLAN' %}<span class="badge badge-gray">VLAN</span>
+                {% else %}<span class="badge badge-gray">{{ n.purpose }}</span>
+                {% endif %}
+              </td>
+              <td style="font-size:12px;">{{ n.vlan }}</td>
+              <td style="font-size:12px; font-family:monospace;">{{ n.subnet }}</td>
+              <td>{% if n.dhcp %}<span class="badge badge-green">On</span>{% else %}<span class="badge badge-gray">Off</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No network data available.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Access Points ─────────────────────────────────────── #}
+  <div class="section">
+    <div class="section-title">Access Points</div>
+    {% if aps %}
+      <div class="ap-grid">
+      {% for ap in aps %}
+        <div class="ap-card">
+          <div class="ap-name">{{ ap.name }}</div>
+          <div class="ap-model">{{ ap.model }} &nbsp;·&nbsp; v{{ ap.version }}</div>
+          <div class="ap-stat"><span>Clients</span><span>{{ ap.clients }}</span></div>
+          <div class="ap-stat"><span>TX Retry</span><span>{{ ap.retry_pct }}%</span></div>
+          <div class="ap-stat"><span>Channels</span><span>{{ ap.channels }}</span></div>
+          <div class="ap-stat"><span>Uptime</span><span>{{ ap.uptime }}</span></div>
+          <div class="ap-status">
+            {% if not ap.connected %}
+              <span class="badge badge-red">Offline</span>
+            {% elif ap.uptime_sec > 0 and ap.uptime_sec < 604800 %}
+              <span class="badge badge-yellow">Recently Rebooted</span>
+            {% elif ap.retry_pct > 5 %}
+              <span class="badge badge-yellow">High Retries</span>
+            {% else %}
+              <span class="badge badge-green">Healthy</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+    {% else %}
+      <div class="card"><div class="empty">No access points found.</div></div>
+    {% endif %}
+  </div>
+
+  {# ── Switches ──────────────────────────────────────────── #}
+  {% if switches %}
+  <div class="section">
+    <div class="section-title">Switches</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Device</th><th>IP</th><th>Ports</th><th>PoE</th><th>Port Issues</th><th>Uptime</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for sw in switches %}
+          <tr>
+            <td><strong>{{ sw.name }}</strong><br><span style="font-size:11px;color:#9ca3af">{{ sw.model }} · v{{ sw.version }}</span></td>
+            <td>{{ sw.ip }}</td>
+            <td>{{ sw.ports }}</td>
+            <td style="font-size:12px;">
+              {% if sw.poe_budget_w > 0 %}
+                {{ sw.poe_used_w }}W / {{ sw.poe_budget_w }}W
+                <div style="margin-top:3px; background:#f3f4f6; border-radius:999px; height:5px; width:80px;">
+                  <div style="background:{% if (sw.poe_used_w / sw.poe_budget_w) > 0.8 %}#ef4444{% else %}#3b82f6{% endif %}; border-radius:999px; height:5px; width:{{ [(sw.poe_used_w / sw.poe_budget_w * 80)|int, 80]|min }}px;"></div>
+                </div>
+              {% else %}
+                <span style="color:#9ca3af;">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if sw.port_issues %}
+                {% for p in sw.port_issues %}
+                  <details style="font-size:12px; margin-bottom:4px;">
+                    <summary style="cursor:pointer; color:#374151; list-style:none; display:flex; align-items:center; gap:6px;">
+                      <span style="color:#6b7280; font-size:10px;">▶</span>
+                      <strong>{{ p.port }}</strong>
+                      <span class="badge badge-{% if p.total > 1000 %}red{% else %}yellow{% endif %}" style="font-size:10px;">{{ p.total }} errors</span>
+                    </summary>
+                    <table style="margin-top:6px; margin-left:14px; font-size:11px; width:auto; border:none;">
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">RX Errors</td><td style="border:none; padding:2px 0;">{{ p.rx_errors }}</td></tr>
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">RX Dropped</td><td style="border:none; padding:2px 0;">{{ p.rx_dropped }}</td></tr>
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">TX Errors</td><td style="border:none; padding:2px 0;">{{ p.tx_errors }}</td></tr>
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">TX Dropped</td><td style="border:none; padding:2px 0;">{{ p.tx_dropped }}</td></tr>
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">RX Total</td><td style="border:none; padding:2px 0;">{{ p.rx_bytes }}</td></tr>
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">TX Total</td><td style="border:none; padding:2px 0;">{{ p.tx_bytes }}</td></tr>
+                      <tr><td style="color:#9ca3af; padding:2px 12px 2px 0; border:none;">Speed</td><td style="border:none; padding:2px 0;">{{ p.speed }} Mbps</td></tr>
+                    </table>
+                  </details>
+                {% endfor %}
+              {% else %}
+                <span style="color:#9ca3af">None</span>
+              {% endif %}
+            </td>
+            <td>{{ sw.uptime }}</td>
+            <td>
+              {% if not sw.connected %}
+                <span class="badge badge-red">Offline</span>
+              {% elif sw.port_issues %}
+                <span class="badge badge-yellow">Port Errors</span>
+              {% else %}
+                <span class="badge badge-green">Healthy</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Firmware Compliance ───────────────────────────────── #}
+  <div class="section">
+    <div class="section-title">
+      Firmware Compliance
+      {% if firmware_upgradable > 0 %}
+        &nbsp;<span class="badge badge-yellow">{{ firmware_upgradable }} upgrade{{ 's' if firmware_upgradable != 1 else '' }} available</span>
+      {% else %}
+        &nbsp;<span class="badge badge-green">All devices current</span>
+      {% endif %}
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Device</th><th>Type</th><th>Model</th><th>Version</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for f in firmware %}
+          <tr>
+            <td><strong>{{ f.name }}</strong></td>
+            <td><span class="badge badge-gray">{{ f.type }}</span></td>
+            <td style="font-size:12px; color:#6b7280;">{{ f.model }}</td>
+            <td style="font-size:12px; font-family:monospace;">{{ f.version }}</td>
+            <td>
+              {% if not f.connected %}
+                <span class="badge badge-red">Offline</span>
+              {% elif f.upgradable %}
+                <span class="badge badge-yellow">Upgrade → {{ f.upgrade_to }}</span>
+              {% else %}
+                <span class="badge badge-green">Current</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# ── Events + Recommendations ──────────────────────────── #}
+  <div class="two-col section">
+    <div>
+      <div class="section-title">Recent Events</div>
+      <div class="card">
+        {% if events %}
+          <ul class="timeline">
+          {% for e in events %}
+            <li>
+              <span class="tl-time">{{ e.time }}</span>
+              <div class="tl-icon {{ e.level }}">
+                {% if e.level == 'crit' %}!
+                {% elif e.level == 'warn' %}⚠
+                {% elif e.level == 'ok' %}✓
+                {% else %}i{% endif %}
+              </div>
+              <div class="tl-body">{{ e.message }}</div>
+            </li>
+          {% endfor %}
+          </ul>
+        {% else %}
+          <div class="empty">Event history is not available via the REST API on<br>Network Application 10.x and later.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">Recommendations</div>
+      <div class="card">
+        {% if recommendations %}
+          <table>
+            <thead><tr><th>Priority</th><th>Finding</th><th>Action</th></tr></thead>
+            <tbody>
+            {% for r in recommendations %}
+              <tr>
+                <td>
+                  {% if r.priority == 'high' %}
+                    <span class="badge badge-red">High</span>
+                  {% elif r.priority == 'medium' %}
+                    <span class="badge badge-yellow">Medium</span>
+                  {% else %}
+                    <span class="badge badge-blue">Low</span>
+                  {% endif %}
+                </td>
+                <td style="font-size:12px">{{ r.finding }}</td>
+                <td style="font-size:12px;color:#6b7280">{{ r.action }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="empty" style="color:#16a34a">✓ No issues found. Network looks healthy!</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Generated by <strong>UniFi Network Health Report v1.0.0</strong> &nbsp;·&nbsp; {{ generated_at }}
+  <br>
+  <a href="https://github.com/FryguyPA/Unifi_Network_Health_Report" target="_blank">github.com/FryguyPA/Unifi_Network_Health_Report</a>
+  &nbsp;·&nbsp;
+  <a href="https://fryguy.net" target="_blank">fryguy.net</a>
+</div>
+
+</body>
+</html>

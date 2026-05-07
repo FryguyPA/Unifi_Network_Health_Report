@@ -206,6 +206,14 @@ tempCodeRunnerFile.py
 # Local config with credentials
 config.yaml
 
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# IDE project files
+.idea/
+.vscode/
+
 # Generated reports
 reports/
 
