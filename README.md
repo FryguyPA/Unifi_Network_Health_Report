@@ -1,4 +1,4 @@
-# UniFi Network Health Report
+# UniFi Network Health Report &nbsp; ![version](https://img.shields.io/badge/version-1.0.0-blue) ![license](https://img.shields.io/badge/license-Apache%202.0-green)
 
 A Python tool that connects to a self-hosted **Ubiquiti UniFi Network Application** and generates a clean, standalone HTML report covering network health, client activity, access point performance, switch status, recent events, and actionable recommendations.
 

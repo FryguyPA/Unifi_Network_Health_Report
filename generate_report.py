@@ -5,7 +5,10 @@ Usage:
     python generate_report.py                  # uses config.yaml, prompts for site
     python generate_report.py --config my.yaml
     python generate_report.py --open           # open in browser when done
+    python generate_report.py --version        # show version
 """
+
+__version__ = "1.0.0"
 
 import argparse
 import logging
@@ -79,6 +82,7 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to config file (default: config.yaml)")
     parser.add_argument("--open", action="store_true", dest="open_browser", help="Open the report in your browser when done")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--version", action="version", version=f"UniFi Network Health Report v{__version__}")
     args = parser.parse_args()
 
     if args.debug:
