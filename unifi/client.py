@@ -156,6 +156,49 @@ class UnifiClient:
         data = self._get(f"/api/s/{self.site}/stat/sysinfo")
         return data[0] if data else {}
 
+    def get_wan_stats(self, hours=24, granularity="hourly"):
+        """WAN TX/RX throughput history via stat/report endpoint.
+
+        Returns a list of dicts with keys: time (Unix seconds), tx_bytes,
+        rx_bytes — one record per interval (hourly by default).
+        Tries both UDM and standalone paths; fails silently if unavailable.
+        """
+        import time as _time
+        end_s   = int(_time.time())
+        start_s = end_s - (hours * 3600)
+        # UniFi controllers expect millisecond timestamps for start/end.
+        # "time" must be listed in attrs to be included in the response.
+        payload = {
+            "attrs": ["wan-tx_bytes", "wan-rx_bytes", "time"],
+            "start": start_s * 1000,
+            "end":   end_s   * 1000,
+        }
+        path = f"/api/s/{self.site}/stat/report/{granularity}.site"
+        try:
+            url  = self._api_url(path)
+            resp = self.session.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            records = data.get("data", data)
+            if not isinstance(records, list):
+                return []
+            # Normalise: time field is sometimes ms, sometimes seconds
+            out = []
+            for r in records:
+                ts = r.get("time", 0)
+                if ts > 1e10:          # milliseconds → seconds
+                    ts = ts / 1000
+                out.append({
+                    "time":     int(ts),
+                    "tx_bytes": r.get("wan-tx_bytes") or 0,
+                    "rx_bytes": r.get("wan-rx_bytes") or 0,
+                })
+            log.debug("get_wan_stats: %d %s record(s)", len(out), granularity)
+            return out
+        except Exception as e:
+            log.debug("get_wan_stats failed (%s)", e)
+            return []
+
     def get_dpi_stats(self):
         """Per-client DPI/application usage (may not be available on all setups)."""
         try:
@@ -266,4 +309,5 @@ class UnifiClient:
             "firewall_groups":   _safe("firewall_groups",   self.get_firewall_groups,   []),
             "traffic_routes":    _safe("traffic_routes",    self.get_traffic_routes,    []),
             "port_forwards":     _safe("port_forwards",     self.get_port_forwards,     []),
+            "wan_stats":         _safe("wan_stats",         self.get_wan_stats,         []),
         }

@@ -746,6 +746,106 @@ def _process_port_forwards(pf_list):
     return rows
 
 
+def _process_wan_stats(records, granularity="hourly"):
+    """Convert raw stat/report records into a chart-ready WAN throughput structure.
+
+    Returns a dict with:
+      available  – bool: False when the endpoint returned nothing
+      points     – list of {ts, label, rx_mbps, tx_mbps}
+      max_mbps   – peak value across both series (used for Y-axis scaling)
+      rx_path    – SVG polyline points string for download
+      tx_path    – SVG polyline points string for upload
+      rx_area    – SVG closed path string (area fill) for download
+      tx_area    – SVG closed path string (area fill) for upload
+      y_labels   – list of {y, label} for Y-axis tick marks
+      x_labels   – list of {x, label} for X-axis time labels
+    """
+    from datetime import datetime, timezone
+
+    INTERVAL_S = {"5minutes": 300, "hourly": 3600, "daily": 86400}
+    interval_s = INTERVAL_S.get(granularity, 3600)
+
+    if not records:
+        return {"available": False}
+
+    # Sort by time ascending and build points
+    records = sorted(records, key=lambda r: r.get("time", 0))
+    points = []
+    for r in records:
+        ts      = r.get("time", 0)
+        tx_b    = r.get("tx_bytes", 0) or 0
+        rx_b    = r.get("rx_bytes", 0) or 0
+        tx_mbps = round((tx_b * 8) / (interval_s * 1_000_000), 3)
+        rx_mbps = round((rx_b * 8) / (interval_s * 1_000_000), 3)
+        try:
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            label = dt.strftime("%-I %p").lstrip("0") or dt.strftime("%H:%M")
+        except Exception:
+            label = str(ts)
+        points.append({"ts": ts, "label": label, "tx_mbps": tx_mbps, "rx_mbps": rx_mbps})
+
+    if not points:
+        return {"available": False}
+
+    max_val = max((max(p["tx_mbps"], p["rx_mbps"]) for p in points), default=0)
+    if max_val == 0:
+        max_val = 1  # avoid divide-by-zero; chart will show flat line
+
+    # SVG canvas constants
+    CX0, CY0   = 44, 8      # chart area top-left
+    CW,  CH    = 736, 100   # chart area width / height
+    TOTAL_W    = CX0 + CW   # 780
+    TOTAL_H    = CY0 + CH + 28  # +28 for x-axis labels
+
+    n = len(points)
+
+    def _coords(key):
+        pts = []
+        for i, p in enumerate(points):
+            x = CX0 + (i / max(n - 1, 1)) * CW
+            y = CY0 + CH - (p[key] / max_val) * CH
+            pts.append(f"{x:.1f},{y:.1f}")
+        return pts
+
+    rx_coords = _coords("rx_mbps")
+    tx_coords = _coords("tx_mbps")
+
+    rx_line = " ".join(rx_coords)
+    tx_line = " ".join(tx_coords)
+    rx_area = rx_line + f" {CX0+CW:.1f},{CY0+CH} {CX0},{CY0+CH}"
+    tx_area = tx_line + f" {CX0+CW:.1f},{CY0+CH} {CX0},{CY0+CH}"
+
+    # Y-axis ticks: 4 evenly-spaced labels
+    y_labels = []
+    for step in range(5):
+        val = max_val * step / 4
+        y   = CY0 + CH - (step / 4) * CH
+        y_labels.append({"y": round(y, 1), "label": f"{val:.1f}"})
+
+    # X-axis labels: show up to 6 evenly-spaced time labels
+    x_labels = []
+    tick_count = min(6, n)
+    for i in range(tick_count):
+        idx = round(i * (n - 1) / max(tick_count - 1, 1))
+        x   = CX0 + (idx / max(n - 1, 1)) * CW
+        x_labels.append({"x": round(x, 1), "label": points[idx]["label"]})
+
+    return {
+        "available":  True,
+        "points":     points,
+        "max_mbps":   round(max_val, 2),
+        "rx_path":    rx_line,
+        "tx_path":    tx_line,
+        "rx_area":    rx_area,
+        "tx_area":    tx_area,
+        "y_labels":   y_labels,
+        "x_labels":   x_labels,
+        "total_w":    TOTAL_W,
+        "total_h":    TOTAL_H,
+        "cx0": CX0, "cy0": CY0, "cw": CW, "ch": CH,
+    }
+
+
 def _process_inventory(all_clients_list, local_tz):
     """Process rest/user records into a client inventory table and device-type breakdown.
 
@@ -922,6 +1022,7 @@ def build_report(raw_data, config):
         raw_data.get("all_clients",     []),
     )
     port_forwards   = _process_port_forwards(raw_data.get("port_forwards", []))
+    wan_stats       = _process_wan_stats(raw_data.get("wan_stats", []))
     recommendations = _build_recommendations(aps, switches, health, alarms, thresholds,
                                              firewall.get("flags", []))
 
@@ -995,6 +1096,9 @@ def build_report(raw_data, config):
         "firewall":       firewall,
         "traffic_routes": traffic_routes,
         "port_forwards":  port_forwards,
+
+        # WAN utilization chart
+        "wan_stats": wan_stats,
 
         # Events & alerts
         "events": events,
