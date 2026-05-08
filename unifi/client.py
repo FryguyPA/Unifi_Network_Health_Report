@@ -196,12 +196,13 @@ class UnifiClient:
 
         return {
             "collected_at": datetime.now(timezone.utc).isoformat(),
-            "health":   _safe("health",    self.get_health,               []),
-            "clients":  _safe("clients",   self.get_clients,              []),
-            "devices":  _safe("devices",   self.get_devices,              []),
-            "events":   _safe("events",    lambda: self.get_events(200),  []),
-            "alarms":   _safe("alarms",    self.get_alarms,               []),
-            "sysinfo":  _safe("sysinfo",   self.get_sysinfo,              {}),
-            "wlans":    _safe("wlans",     self.get_wlans,                []),
-            "networks": _safe("networks",  self.get_networks,             []),
+            "health":       _safe("health",       self.get_health,               []),
+            "clients":      _safe("clients",      self.get_clients,              []),
+            "all_clients":  _safe("all_clients",  self.get_all_clients,          []),
+            "devices":      _safe("devices",      self.get_devices,              []),
+            "events":       _safe("events",       lambda: self.get_events(200),  []),
+            "alarms":       _safe("alarms",       self.get_alarms,               []),
+            "sysinfo":      _safe("sysinfo",      self.get_sysinfo,              {}),
+            "wlans":        _safe("wlans",        self.get_wlans,                []),
+            "networks":     _safe("networks",     self.get_networks,             []),
         }

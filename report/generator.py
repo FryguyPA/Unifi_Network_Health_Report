@@ -382,6 +382,90 @@ def _process_vpn(health):
     }
 
 
+# UniFi device category codes (dev_cat field on rest/user records)
+_DEV_CAT_LABEL = {
+    0:  "Unknown",
+    1:  "Computer",
+    2:  "Access Point",
+    3:  "Router",
+    4:  "Switch",
+    5:  "NAS",
+    6:  "VoIP Phone",
+    7:  "IP Camera",
+    8:  "Smart TV",
+    9:  "Raspberry Pi",
+    10: "Game Console",
+    11: "Printer",
+    12: "Wireless Device",
+    13: "Tablet",
+    14: "Mobile Phone",
+    15: "Laptop",
+    16: "Desktop",
+    17: "Gaming Device",
+    18: "Smart Speaker",
+    19: "Streaming Device",
+    20: "Smart Home Hub",
+    21: "Set-top Box",
+    22: "Smart Watch",
+    23: "Server",
+    40: "Smartphone",
+    41: "Apple Device",
+    42: "IoT Device",
+    43: "Smart Home",
+    44: "iPhone / iPad",
+    45: "Android Phone",
+    46: "Mac",
+    47: "Media Device",
+    48: "Smart TV",
+    49: "Smart Home",
+    50: "IP Camera",
+    51: "Nest / Google",
+    52: "Sonos / Audio",
+    53: "Amazon Echo",
+}
+
+# Roll fine-grained categories into broader display groups
+_DEV_CAT_GROUP = {
+    0:  "Unknown",
+    1:  "Computers",
+    2:  "Network",
+    3:  "Network",
+    4:  "Network",
+    5:  "Computers",
+    6:  "Phones",
+    7:  "Cameras",
+    8:  "Media",
+    9:  "Computers",
+    10: "Gaming",
+    11: "Printers",
+    12: "Other",
+    13: "Phones",
+    14: "Phones",
+    15: "Computers",
+    16: "Computers",
+    17: "Gaming",
+    18: "Media",
+    19: "Media",
+    20: "IoT",
+    21: "Media",
+    22: "Phones",
+    23: "Computers",
+    40: "Phones",
+    41: "Phones",
+    42: "IoT",
+    43: "IoT",
+    44: "Phones",
+    45: "Phones",
+    46: "Computers",
+    47: "Media",
+    48: "Media",
+    49: "IoT",
+    50: "Cameras",
+    51: "IoT",
+    52: "Media",
+    53: "IoT",
+}
+
 _NETWORK_PURPOSE_LABEL = {
     "corporate":       "LAN",
     "guest":           "Guest",
@@ -428,6 +512,67 @@ def _process_firmware(device_list):
     rows.sort(key=lambda x: (not x["upgradable"], type_order.get(
         next((d.get("type","") for d in device_list if d.get("name")==x["name"]), ""), 9), x["name"]))
     return rows
+
+
+def _process_inventory(all_clients_list, local_tz):
+    """Process rest/user records into a client inventory table and device-type breakdown.
+
+    rest/user returns all known clients (including disconnected ones) with
+    UniFi's built-in OUI resolution and device fingerprinting fields.
+    """
+    _GROUP_ORDER = ["Computers", "Phones", "IoT", "Media", "Gaming", "Cameras",
+                    "Printers", "Network", "Other", "Unknown"]
+
+    rows = []
+    category_counts = {}
+
+    for c in all_clients_list:
+        dev_cat   = c.get("dev_cat")
+        cat_label = _DEV_CAT_LABEL.get(dev_cat, "Unknown") if dev_cat is not None else "Unknown"
+        cat_group = _DEV_CAT_GROUP.get(dev_cat, "Unknown") if dev_cat is not None else "Unknown"
+
+        category_counts[cat_group] = category_counts.get(cat_group, 0) + 1
+
+        # Prefer dev_family when it's a descriptive string (e.g. "iPhone", "MacBook Pro").
+        # UniFi sometimes returns dev_family as an integer code — ignore those and fall
+        # back to our cat_label mapping so the column never shows a bare number.
+        dev_family_raw = c.get("dev_family")
+        if isinstance(dev_family_raw, str) and dev_family_raw.strip():
+            device_type = dev_family_raw
+        else:
+            device_type = cat_label
+
+        last_seen_ts = c.get("last_seen", 0) or 0
+        first_seen_ts = c.get("first_seen", 0) or 0
+
+        rows.append({
+            "hostname":    c.get("hostname") or c.get("name") or c.get("mac", ""),
+            "ip":          c.get("last_ip") or "—",
+            "mac":         c.get("mac", ""),
+            "oui":         c.get("oui") or "—",
+            "device_type": device_type,
+            "cat_group":   cat_group,
+            "network":     c.get("last_connection_network_name") or "—",
+            "is_wired":    c.get("is_wired", False),
+            "is_guest":    c.get("is_guest", False),
+            "last_seen":   _ts_to_local(last_seen_ts, local_tz) if last_seen_ts else "—",
+            "last_seen_ts": last_seen_ts,
+            "first_seen":  _ts_to_local(first_seen_ts, local_tz) if first_seen_ts else "—",
+        })
+
+    rows.sort(key=lambda x: x["last_seen_ts"], reverse=True)
+
+    breakdown = [
+        {"label": grp, "count": category_counts[grp]}
+        for grp in _GROUP_ORDER
+        if category_counts.get(grp, 0) > 0
+    ]
+
+    return {
+        "rows":      rows,
+        "total":     len(rows),
+        "breakdown": breakdown,
+    }
 
 
 def _build_recommendations(aps, switches, health, alarms, thresholds):
@@ -524,6 +669,7 @@ def build_report(raw_data, config):
     vpn      = _process_vpn(health)
     networks = _process_networks(raw_data.get("networks", []))
     firmware = _process_firmware(raw_data.get("devices",  []))
+    inventory = _process_inventory(raw_data.get("all_clients", []), local_tz)
     recommendations = _build_recommendations(aps, switches, health, alarms, thresholds)
 
     # Merge per-interface IP/media from gateway device into wan_connections
@@ -588,6 +734,9 @@ def build_report(raw_data, config):
         # Firmware
         "firmware": firmware,
         "firmware_upgradable": sum(1 for f in firmware if f["upgradable"]),
+
+        # Client inventory + device fingerprinting
+        "inventory": inventory,
 
         # Events & alerts
         "events": events,

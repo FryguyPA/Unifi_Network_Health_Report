@@ -81,8 +81,9 @@
 
   .footer { text-align: center; font-size: 12px; color: #9ca3af; padding: 24px; border-top: 1px solid #e5e7eb; margin-top: 8px; }
 
-  details[open] summary span:first-child { transform: rotate(90deg); display:inline-block; }
   details summary::-webkit-details-marker { display: none; }
+  details summary { list-style: none; }
+  details[open] summary > span:first-child { transform: rotate(90deg); display: inline-block; }
 </style>
 </head>
 <body>
@@ -327,6 +328,140 @@
       {% endif %}
     </div>
   </div>
+
+  {# ── Client Inventory ──────────────────────────────────── #}
+  {% if inventory.total > 0 %}
+  <div class="section">
+    <div class="section-title">
+      Client Inventory
+      &nbsp;<span class="badge badge-gray">{{ inventory.total }} known devices</span>
+    </div>
+
+    {# Device-type breakdown cards #}
+    {% if inventory.breakdown %}
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+      {% for grp in inventory.breakdown %}
+      <div style="background:white; border-radius:10px; padding:14px 20px; box-shadow:0 1px 4px rgba(0,0,0,.08); text-align:center; min-width:96px;">
+        <div style="font-size:28px; font-weight:700; color:#111827; line-height:1;">{{ grp.count }}</div>
+        <div style="font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px; margin-top:4px;">{{ grp.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Full inventory table — collapsible to keep the report skimmable #}
+    <div class="card">
+      <details>
+        <summary style="cursor:pointer; font-size:13px; font-weight:600; color:#374151; list-style:none; display:flex; align-items:center; gap:8px; padding:2px 0;">
+          <span style="color:#6b7280; font-size:10px; transition:transform .15s;">▶</span>
+          View all {{ inventory.total }} devices
+          <span style="font-size:12px; font-weight:400; color:#9ca3af; margin-left:4px;">— sorted by most recently seen</span>
+        </summary>
+        <div style="margin-top:16px; overflow-x:auto;">
+          <table id="inventory-table">
+            <thead>
+              <tr>
+                <th>Hostname</th>
+                <th>Last IP</th>
+                <th>MAC</th>
+                <th>Manufacturer</th>
+                <th>Device Type</th>
+                <th>Network</th>
+                <th>Connection</th>
+                <th>Last Seen</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for row in inventory.rows %}
+              <tr>
+                <td data-sort="{{ row.hostname | lower }}"><strong>{{ row.hostname }}</strong></td>
+                <td data-sort="{{ row.ip }}" style="font-family:monospace; font-size:12px;">{{ row.ip }}</td>
+                <td data-sort="{{ row.mac }}" style="font-family:monospace; font-size:11px; color:#9ca3af;">{{ row.mac }}</td>
+                <td data-sort="{{ row.oui | lower }}" style="font-size:12px;">{{ row.oui }}</td>
+                <td data-sort="{{ row.device_type | lower }}" style="font-size:12px;">{{ row.device_type }}</td>
+                <td data-sort="{{ row.network | lower }}">
+                  {% if row.network != '—' %}
+                    <span class="badge badge-gray" style="font-size:10px;">{{ row.network }}</span>
+                  {% else %}
+                    <span style="color:#9ca3af;">—</span>
+                  {% endif %}
+                </td>
+                <td data-sort="{{ 'wired' if row.is_wired else 'wifi' }}">
+                  {% if row.is_wired %}
+                    <span class="badge badge-blue">Wired</span>
+                  {% else %}
+                    <span class="badge badge-purple">WiFi</span>
+                  {% endif %}
+                  {% if row.is_guest %}
+                    <span class="badge badge-yellow" style="margin-left:3px;">Guest</span>
+                  {% endif %}
+                </td>
+                <td data-sort="{{ row.last_seen_ts }}" style="font-size:12px; color:#6b7280; white-space:nowrap;">{{ row.last_seen }}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <script>
+        (function(){
+          var tbl = document.getElementById('inventory-table');
+          if(!tbl) return;
+          var tbody = tbl.querySelector('tbody');
+          var sortCol = -1, sortDir = 1;
+
+          function cellVal(row, col) {
+            var td = row.querySelectorAll('td')[col];
+            if(!td) return '';
+            return (td.dataset.sort !== undefined && td.dataset.sort !== '')
+              ? td.dataset.sort
+              : td.textContent.trim();
+          }
+
+          function compare(a, b) {
+            /* IP addresses — compare each octet numerically */
+            if(/^\d+\.\d+\.\d+\.\d+$/.test(a) && /^\d+\.\d+\.\d+\.\d+$/.test(b)) {
+              var ap = a.split('.').map(Number), bp = b.split('.').map(Number);
+              for(var i=0;i<4;i++){ if(ap[i]!==bp[i]) return ap[i]-bp[i]; }
+              return 0;
+            }
+            /* Numeric (timestamps, etc.) */
+            var an=parseFloat(a), bn=parseFloat(b);
+            if(!isNaN(an) && !isNaN(bn)) return an - bn;
+            /* Text — case-insensitive */
+            return a.localeCompare(b);
+          }
+
+          /* Decorate headers */
+          Array.from(tbl.querySelectorAll('thead th')).forEach(function(th, idx){
+            th.style.cursor = 'pointer';
+            th.style.userSelect = 'none';
+            th.style.whiteSpace = 'nowrap';
+            var ind = document.createElement('span');
+            ind.className = 'sort-ind';
+            ind.style.cssText = 'margin-left:5px;font-size:9px;color:#9ca3af;';
+            ind.textContent = '⇅';
+            th.appendChild(ind);
+
+            th.addEventListener('click', function(){
+              if(sortCol === idx){ sortDir = -sortDir; }
+              else { sortCol = idx; sortDir = 1; }
+
+              Array.from(tbody.querySelectorAll('tr'))
+                .sort(function(a,b){ return compare(cellVal(a,idx), cellVal(b,idx)) * sortDir; })
+                .forEach(function(r){ tbody.appendChild(r); });
+
+              Array.from(tbl.querySelectorAll('thead th .sort-ind')).forEach(function(s,i){
+                s.textContent = (i===idx) ? (sortDir===1 ? ' ▲' : ' ▼') : '⇅';
+                s.style.color  = (i===idx) ? '#3b82f6' : '#9ca3af';
+              });
+            });
+          });
+        })();
+        </script>
+      </details>
+    </div>
+  </div>
+  {% endif %}
 
   {# ── Access Points ─────────────────────────────────────── #}
   <div class="section">
