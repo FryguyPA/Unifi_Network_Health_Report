@@ -514,6 +514,238 @@ def _process_firmware(device_list):
     return rows
 
 
+# Display order and friendly names for UniFi rulesets
+_RULESET_ORDER = [
+    "WAN_IN", "WAN_OUT", "WAN_LOCAL",
+    "LAN_IN", "LAN_OUT", "LAN_LOCAL",
+    "GUEST_IN", "GUEST_OUT", "GUEST_LOCAL",
+]
+_RULESET_LABEL = {
+    "WAN_IN":     "WAN In",
+    "WAN_OUT":    "WAN Out",
+    "WAN_LOCAL":  "WAN Local",
+    "LAN_IN":     "LAN In",
+    "LAN_OUT":    "LAN Out",
+    "LAN_LOCAL":  "LAN Local",
+    "GUEST_IN":   "Guest In",
+    "GUEST_OUT":  "Guest Out",
+    "GUEST_LOCAL":"Guest Local",
+}
+
+
+def _process_firewall(rule_list, group_list, network_list):
+    """Transform raw firewall rules and groups into display-ready structures.
+
+    Returns a dict with:
+      rulesets   – ordered list of {label, key, rules, flag_count}
+      groups     – list of firewall group summaries
+      flags      – flat list of security findings across all rules
+      total      – total rule count
+      enabled    – count of enabled rules
+    """
+    # Build lookup dicts so we can resolve IDs to names
+    group_by_id = {g["_id"]: g for g in group_list if "_id" in g}
+    net_by_id   = {n["_id"]: n for n in network_list if "_id" in n}
+
+    def _resolve_endpoint(addr, group_ids, net_id, net_type):
+        """Return a human-readable endpoint string."""
+        parts = []
+        if addr:
+            parts.append(addr)
+        for gid in (group_ids or []):
+            g = group_by_id.get(gid)
+            if g:
+                parts.append(f"{g['name']} (group)")
+        if net_id:
+            n = net_by_id.get(net_id)
+            label = n.get("name") if n else net_id
+            if net_type and net_type != "NETv4":
+                label = f"{label} ({net_type})"
+            parts.append(label)
+        return ", ".join(parts) if parts else "Any"
+
+    def _proto_label(rule):
+        proto = (rule.get("protocol") or "all").lower()
+        if proto in ("", "all"):
+            return "All"
+        return proto.upper().replace("TCP_UDP", "TCP+UDP")
+
+    # Collect flags for security review
+    all_flags = []
+
+    # rule_list is None when the API endpoint failed entirely
+    if rule_list is None:
+        return {
+            "rulesets":  [],
+            "groups":    [],
+            "flags":     [],
+            "total":     0,
+            "enabled":   0,
+            "available": False,
+        }
+
+    # Group rules by ruleset
+    by_ruleset: dict = {}
+    for rule in rule_list:
+        rs = rule.get("ruleset", "UNKNOWN")
+        by_ruleset.setdefault(rs, []).append(rule)
+
+    rulesets = []
+    for rs_key in _RULESET_ORDER + [k for k in by_ruleset if k not in _RULESET_ORDER]:
+        rules_raw = by_ruleset.get(rs_key, [])
+        if not rules_raw:
+            continue
+
+        rules_raw.sort(key=lambda r: r.get("rule_index", 9999))
+
+        rule_rows = []
+        rs_flags = 0
+        for r in rules_raw:
+            src = _resolve_endpoint(
+                r.get("src_address", ""),
+                r.get("src_firewallgroup_ids"),
+                r.get("src_networkconf_id"),
+                r.get("src_networkconf_type"),
+            )
+            dst = _resolve_endpoint(
+                r.get("dst_address", ""),
+                r.get("dst_firewallgroup_ids"),
+                r.get("dst_networkconf_id"),
+                r.get("dst_networkconf_type"),
+            )
+
+            action   = (r.get("action") or "accept").lower()
+            enabled  = r.get("enabled", True)
+            name     = r.get("name") or f"Rule {r.get('rule_index','?')}"
+            dst_port = r.get("dst_portrange") or r.get("dst_port") or ""
+
+            # Security flag: WAN_IN accept with unrestricted source
+            flags = []
+            if rs_key == "WAN_IN" and action == "accept" and src == "Any" and enabled:
+                flags.append("Unrestricted inbound accept")
+                all_flags.append({
+                    "ruleset": _RULESET_LABEL.get(rs_key, rs_key),
+                    "rule":    name,
+                    "finding": "Accepts all inbound WAN traffic from any source",
+                    "priority": "high",
+                })
+                rs_flags += 1
+
+            if not enabled:
+                flags.append("Disabled")
+
+            rule_rows.append({
+                "index":    r.get("rule_index", "—"),
+                "name":     name,
+                "enabled":  enabled,
+                "action":   action,
+                "protocol": _proto_label(r),
+                "src":      src,
+                "dst":      dst,
+                "dst_port": str(dst_port) if dst_port else "Any",
+                "logging":  r.get("logging", False),
+                "flags":    flags,
+            })
+
+        rulesets.append({
+            "key":        rs_key,
+            "label":      _RULESET_LABEL.get(rs_key, rs_key),
+            "rules":      rule_rows,
+            "count":      len(rule_rows),
+            "enabled":    sum(1 for r in rule_rows if r["enabled"]),
+            "flag_count": rs_flags,
+        })
+
+    # Firewall group summary
+    group_rows = []
+    for g in sorted(group_list, key=lambda x: x.get("name", "")):
+        members = g.get("group_members", [])
+        group_rows.append({
+            "name":    g.get("name", "—"),
+            "type":    g.get("group_type", "—").replace("-", " ").title(),
+            "members": members,
+            "count":   len(members),
+        })
+
+    total   = sum(rs["count"]   for rs in rulesets)
+    enabled = sum(rs["enabled"] for rs in rulesets)
+
+    return {
+        "rulesets":  rulesets,
+        "groups":    group_rows,
+        "flags":     all_flags,
+        "total":     total,
+        "enabled":   enabled,
+        "available": rule_list is not None,   # False only if caller passes None
+    }
+
+
+def _process_traffic_routes(route_list, network_list, all_clients_list):
+    """Process v2 traffic-route (policy routing) records.
+
+    Resolves network_id → name and client MACs → hostname where possible.
+    """
+    net_by_id  = {n["_id"]: n.get("name", n["_id"]) for n in network_list if "_id" in n}
+    mac_to_name = {}
+    for c in all_clients_list:
+        mac = c.get("mac", "")
+        if mac:
+            mac_to_name[mac.lower()] = (c.get("hostname") or c.get("name") or mac)
+
+    rows = []
+    for r in route_list:
+        network_id  = r.get("network_id", "")
+        network_name = net_by_id.get(network_id, network_id or "Any")
+        target = r.get("matching_target", "INTERNET")
+
+        devices = r.get("target_devices", [])
+        device_labels = []
+        for d in devices:
+            mac = (d.get("client_mac") or "").lower()
+            dtype = d.get("type", "")
+            if dtype == "NETWORK":
+                net = net_by_id.get(d.get("network_id", ""), d.get("network_id", "?"))
+                device_labels.append(f"{net} (network)")
+            elif mac:
+                device_labels.append(mac_to_name.get(mac, mac))
+
+        rows.append({
+            "name":          r.get("description") or r.get("name") or "—",
+            "enabled":       r.get("enabled", True),
+            "network":       network_name,
+            "target":        target,
+            "kill_switch":   r.get("kill_switch_enabled", False),
+            "device_count":  len(devices),
+            "devices":       device_labels,
+            "next_hop":      r.get("next_hop") or "—",
+        })
+
+    rows.sort(key=lambda x: x["name"].lower())
+    return rows
+
+
+def _process_port_forwards(pf_list):
+    """Process port-forward / DNAT rules into display rows."""
+    rows = []
+    for r in pf_list:
+        proto = (r.get("proto") or "tcp_udp").upper().replace("TCP_UDP", "TCP+UDP")
+        src   = r.get("src") or "Any"
+        src_enabled = r.get("src_limiting_enabled", False)
+        rows.append({
+            "name":      r.get("name") or "—",
+            "enabled":   r.get("enabled", True),
+            "proto":     proto,
+            "interface": (r.get("pfwd_interface") or "wan").upper(),
+            "src":       src if src_enabled else "Any",
+            "ext_port":  r.get("dst_port") or "—",
+            "fwd_ip":    r.get("fwd") or "—",
+            "fwd_port":  r.get("fwd_port") or "—",
+            "logging":   r.get("log", False),
+        })
+    rows.sort(key=lambda x: (not x["enabled"], x["name"].lower()))
+    return rows
+
+
 def _process_inventory(all_clients_list, local_tz):
     """Process rest/user records into a client inventory table and device-type breakdown.
 
@@ -575,7 +807,7 @@ def _process_inventory(all_clients_list, local_tz):
     }
 
 
-def _build_recommendations(aps, switches, health, alarms, thresholds):
+def _build_recommendations(aps, switches, health, alarms, thresholds, firewall_flags=None):
     """Generate a prioritized list of actionable recommendations."""
     recs = []
 
@@ -639,6 +871,14 @@ def _build_recommendations(aps, switches, health, alarms, thresholds):
             "action": "Check ISP connection and gateway WAN port.",
         })
 
+    # Firewall security flags
+    for flag in (firewall_flags or []):
+        recs.append({
+            "priority": flag.get("priority", "high"),
+            "finding":  f"Firewall ({flag['ruleset']}) — {flag['rule']}: {flag['finding']}",
+            "action":   "Review rule scope; restrict source to known IPs or a named address group.",
+        })
+
     return recs
 
 
@@ -670,7 +910,20 @@ def build_report(raw_data, config):
     networks = _process_networks(raw_data.get("networks", []))
     firmware = _process_firmware(raw_data.get("devices",  []))
     inventory = _process_inventory(raw_data.get("all_clients", []), local_tz)
-    recommendations = _build_recommendations(aps, switches, health, alarms, thresholds)
+    _fw_rules       = raw_data.get("firewall_rules")   # None = fetch failed; [] = no rules
+    firewall        = _process_firewall(
+        _fw_rules,
+        raw_data.get("firewall_groups", []),
+        raw_data.get("networks",        []),
+    )
+    traffic_routes  = _process_traffic_routes(
+        raw_data.get("traffic_routes",  []),
+        raw_data.get("networks",        []),
+        raw_data.get("all_clients",     []),
+    )
+    port_forwards   = _process_port_forwards(raw_data.get("port_forwards", []))
+    recommendations = _build_recommendations(aps, switches, health, alarms, thresholds,
+                                             firewall.get("flags", []))
 
     # Merge per-interface IP/media from gateway device into wan_connections
     gw_wan_ifaces = {}
@@ -737,6 +990,11 @@ def build_report(raw_data, config):
 
         # Client inventory + device fingerprinting
         "inventory": inventory,
+
+        # Firewall, routing & NAT
+        "firewall":       firewall,
+        "traffic_routes": traffic_routes,
+        "port_forwards":  port_forwards,
 
         # Events & alerts
         "events": events,

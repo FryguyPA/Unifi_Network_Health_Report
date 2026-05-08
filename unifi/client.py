@@ -175,6 +175,63 @@ class UnifiClient:
         """Configured networks (VLANs, WAN, VPN, etc.)."""
         return self._get(f"/api/s/{self.site}/rest/networkconf")
 
+    def get_traffic_routes(self):
+        """Per-device WAN-selection / policy routing rules (v2 API, NA 8+)."""
+        try:
+            data = self._get_v2(f"/site/{self.site}/trafficroutes")
+            log.debug("get_traffic_routes: %d route(s)", len(data) if isinstance(data, list) else 0)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            log.debug("get_traffic_routes failed (%s)", e)
+            return []
+
+    def get_port_forwards(self):
+        """Port-forwarding / DNAT rules."""
+        try:
+            data = self._get(f"/api/s/{self.site}/rest/portforward")
+            log.debug("get_port_forwards: %d rule(s)", len(data))
+            return data
+        except Exception as e:
+            log.debug("get_port_forwards failed (%s)", e)
+            return []
+
+    def get_firewall_rules(self):
+        """User-defined firewall rules for all rulesets.
+
+        Tries the standard v1 path first, then a v2 fallback.  Logs the
+        response count at DEBUG level so --debug reveals exactly what the
+        controller returns.
+        """
+        path = f"/api/s/{self.site}/rest/firewallrule"
+        try:
+            data = self._get(path)
+            log.debug("get_firewall_rules: %d rule(s) via %s", len(data), path)
+            return data
+        except Exception as e:
+            log.debug("get_firewall_rules v1 failed (%s), trying v2 …", e)
+
+        # v2 fallback (UDM-Pro firmware 3.x+ / Network Application 8.x+)
+        try:
+            data = self._get_v2(f"/site/{self.site}/firewall/rule")
+            log.debug("get_firewall_rules: %d rule(s) via v2 API", len(data) if isinstance(data, list) else 0)
+            return data if isinstance(data, list) else []
+        except Exception as e2:
+            log.debug("get_firewall_rules v2 failed (%s)", e2)
+
+        log.info("Firewall rules endpoint not available on this controller.")
+        return []
+
+    def get_firewall_groups(self):
+        """Firewall groups (address-group, port-group, ipv6-address-group)."""
+        path = f"/api/s/{self.site}/rest/firewallgroup"
+        try:
+            data = self._get(path)
+            log.debug("get_firewall_groups: %d group(s)", len(data))
+            return data
+        except Exception as e:
+            log.debug("get_firewall_groups failed (%s)", e)
+            return []
+
     # ------------------------------------------------------------------
     # Convenience: collect all report data in one call
     # ------------------------------------------------------------------
@@ -196,13 +253,17 @@ class UnifiClient:
 
         return {
             "collected_at": datetime.now(timezone.utc).isoformat(),
-            "health":       _safe("health",       self.get_health,               []),
-            "clients":      _safe("clients",      self.get_clients,              []),
-            "all_clients":  _safe("all_clients",  self.get_all_clients,          []),
-            "devices":      _safe("devices",      self.get_devices,              []),
-            "events":       _safe("events",       lambda: self.get_events(200),  []),
-            "alarms":       _safe("alarms",       self.get_alarms,               []),
-            "sysinfo":      _safe("sysinfo",      self.get_sysinfo,              {}),
-            "wlans":        _safe("wlans",        self.get_wlans,                []),
-            "networks":     _safe("networks",     self.get_networks,             []),
+            "health":           _safe("health",           self.get_health,               []),
+            "clients":          _safe("clients",          self.get_clients,              []),
+            "all_clients":      _safe("all_clients",      self.get_all_clients,          []),
+            "devices":          _safe("devices",          self.get_devices,              []),
+            "events":           _safe("events",           lambda: self.get_events(200),  []),
+            "alarms":           _safe("alarms",           self.get_alarms,               []),
+            "sysinfo":          _safe("sysinfo",          self.get_sysinfo,              {}),
+            "wlans":            _safe("wlans",            self.get_wlans,                []),
+            "networks":         _safe("networks",         self.get_networks,             []),
+            "firewall_rules":    _safe("firewall_rules",    self.get_firewall_rules,    None),
+            "firewall_groups":   _safe("firewall_groups",   self.get_firewall_groups,   []),
+            "traffic_routes":    _safe("traffic_routes",    self.get_traffic_routes,    []),
+            "port_forwards":     _safe("port_forwards",     self.get_port_forwards,     []),
         }

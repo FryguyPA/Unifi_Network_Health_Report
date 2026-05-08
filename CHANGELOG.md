@@ -71,9 +71,30 @@ Initial public release.
 
 ---
 
+---
+
+## [1.2.0] - 2026-05-08
+
+### Added
+
+**Firewall Rules**
+- `get_firewall_rules()` and `get_firewall_groups()` methods in `unifi/client.py` — fetches `rest/firewallrule` and `rest/firewallgroup` endpoints; both integrated into `collect_report_data()` with `_safe()` error isolation
+- `_process_firewall()` in `report/generator.py`:
+  - Resolves firewall group IDs and network config IDs to human-readable names so Source/Destination columns never show raw UUIDs
+  - Groups rules by ruleset (`WAN_IN`, `WAN_OUT`, `WAN_LOCAL`, `LAN_IN`, etc.) and sorts within each group by `rule_index`
+  - Security flag: WAN_IN `accept` rules with no source restriction are flagged as high-priority findings
+  - Disabled rules are labeled inline
+- **Firewall Rules section** in `templates/report.html`:
+  - Ruleset summary strip — one card per active ruleset with color-coded top border (blue = WAN, amber = Guest, purple = LAN) and a red flag count badge when issues exist
+  - Per-ruleset `<details>` tables — rule index, name, action badge (green Accept / red Drop / yellow Reject), protocol, source, destination, port, enabled status, and logging indicator; rulesets with security flags open by default
+  - Firewall Groups collapsible table — group name, type, and member list (click to expand members)
+- Firewall security flags are now included in the Recommendations section alongside AP, switch, and alarm findings
+
+---
+
 <!-- Add new versions above this line:
 
-## [1.2.0] - YYYY-MM-DD
+## [1.3.0] - YYYY-MM-DD
 
 ### Added
 ### Changed
