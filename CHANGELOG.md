@@ -50,9 +50,30 @@ Initial public release.
 
 ---
 
+## [1.1.0] - 2026-05-08
+
+### Added
+
+**Client Inventory & Device Fingerprinting**
+- New `get_all_clients()` method in `unifi/client.py` — fetches `rest/user` endpoint which returns all known devices (including disconnected), with UniFi's built-in OUI resolution and fingerprinting data (`dev_cat`, `dev_family`, `oui`, `confidence`)
+- `_process_inventory()` in `report/generator.py` — transforms `rest/user` records into a structured inventory with:
+  - `_DEV_CAT_LABEL` — maps 40+ UniFi `dev_cat` integer codes to human-readable device type names
+  - `_DEV_CAT_GROUP` — rolls fine-grained categories into 10 broad display groups (Computers, Phones, IoT, Media, Gaming, Cameras, Printers, Network, Other, Unknown)
+  - Sorted by `last_seen` descending; devices with no last-seen timestamp listed last
+  - MAC address used as hostname fallback for unnamed devices
+- **Client Inventory section** in `templates/report.html`:
+  - Device-type breakdown cards — always-visible count per group (e.g. Computers: 12, Phones: 34, IoT: 47)
+  - Full inventory table inside a collapsible `<details>` — hostname, last IP, MAC, manufacturer (OUI), device type, network badge, wired/WiFi + guest badges, last seen timestamp
+  - All 8 columns are **sortable** — click any header to sort ascending/descending with a ▲/▼ indicator; IP addresses sort numerically by octet; timestamps sort by raw Unix value behind the formatted label
+
+### Fixed
+- `dev_family` integer bug — UniFi sometimes returns `dev_family` as a numeric code rather than a descriptive string; the field is now type-checked (`isinstance(str)`) so integer values fall back to the `_DEV_CAT_LABEL` mapping instead of rendering as a bare number in the Device Type column
+
+---
+
 <!-- Add new versions above this line:
 
-## [1.1.0] - YYYY-MM-DD
+## [1.2.0] - YYYY-MM-DD
 
 ### Added
 ### Changed
