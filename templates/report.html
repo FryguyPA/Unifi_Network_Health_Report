@@ -5,80 +5,346 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UniFi Network Report — {{ site_name }}</title>
 <style>
+  /* ── Theme tokens (Light — default) ───────────────────────── */
+  :root {
+    --font:            -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --body-bg:         #f0f2f5;
+    --body-color:      #1a1a2e;
+
+    --header-bg:       linear-gradient(135deg, #0c1a3a 0%, #1a3a6b 100%);
+    --header-border:   none;
+    --header-site:     #7eb3ff;
+    --header-right:    #a0bce0;
+    --header-strong:   #ffffff;
+    --logo-dot:        #0066ff;
+
+    --card-bg:         #ffffff;
+    --card-shadow:     0 1px 4px rgba(0,0,0,.08);
+    --card-border:     transparent;
+    --card-radius:     12px;
+
+    --kpi-bg:          #ffffff;
+    --kpi-value:       #111827;
+    --kpi-label:       #6b7280;
+    --kpi-sub:         #9ca3af;
+
+    --section-color:   #374151;
+    --section-border:  #e5e7eb;
+    --section-weight:  700;
+    --section-font:    inherit;
+
+    --th-color:        #6b7280;
+    --th-border:       #f3f4f6;
+    --td-color:        #374151;
+    --td-border:       #f3f4f6;
+    --tr-hover:        #fafafa;
+
+    --badge-green-bg:  #dcfce7; --badge-green-fg:  #16a34a;
+    --badge-red-bg:    #fee2e2; --badge-red-fg:    #dc2626;
+    --badge-yellow-bg: #fef3c7; --badge-yellow-fg: #d97706;
+    --badge-blue-bg:   #dbeafe; --badge-blue-fg:   #1d4ed8;
+    --badge-purple-bg: #ede9fe; --badge-purple-fg: #7c3aed;
+    --badge-gray-bg:   #f3f4f6; --badge-gray-fg:   #6b7280;
+    --badge-radius:    999px;
+    --badge-border:    none;
+
+    --ap-bg:           #f9fafb;
+    --ap-border:       #e5e7eb;
+    --ap-name:         #111827;
+    --ap-model:        #9ca3af;
+    --ap-stat:         #6b7280;
+    --ap-stat-val:     #374151;
+
+    --tl-border:       #f3f4f6;
+    --tl-time:         #9ca3af;
+    --tl-body:         #374151;
+
+    --empty-color:     #9ca3af;
+    --footer-border:   #e5e7eb;
+    --footer-color:    #9ca3af;
+  }
+
+  /* ── Theme: Dark Terminal ─────────────────────────────────── */
+  [data-theme="terminal"] {
+    --font:            'SF Mono', 'Fira Code', 'Menlo', 'Courier New', monospace;
+    --body-bg:         #080c14;
+    --body-color:      #c8d8f0;
+
+    --header-bg:       #080c14;
+    --header-border:   1px solid #0d2a4a;
+    --header-site:     #4a90c4;
+    --header-right:    #4a7090;
+    --header-strong:   #00d4ff;
+    --logo-dot:        #00d4ff;
+
+    --card-bg:         #0a1220;
+    --card-shadow:     none;
+    --card-border:     #0d2a4a;
+    --card-radius:     4px;
+
+    --kpi-bg:          #0a1220;
+    --kpi-value:       #00d4ff;
+    --kpi-label:       #3a6080;
+    --kpi-sub:         #1a4060;
+
+    --section-color:   #00d4ff;
+    --section-border:  #0d2a4a;
+    --section-weight:  400;
+    --section-font:    var(--font);
+
+    --th-color:        #1a5070;
+    --th-border:       #0d2a4a;
+    --td-color:        #7aa8c8;
+    --td-border:       #091828;
+    --tr-hover:        #0c1828;
+
+    --badge-green-bg:  #002a18; --badge-green-fg:  #00ff88;
+    --badge-red-bg:    #2a0800; --badge-red-fg:    #ff4400;
+    --badge-yellow-bg: #2a1a00; --badge-yellow-fg: #ffaa00;
+    --badge-blue-bg:   #001828; --badge-blue-fg:   #00d4ff;
+    --badge-purple-bg: #1a0a28; --badge-purple-fg: #aa88ff;
+    --badge-gray-bg:   #0d1a28; --badge-gray-fg:   #4a7090;
+    --badge-radius:    2px;
+    --badge-border:    1px solid currentColor;
+
+    --ap-bg:           #0a1220;
+    --ap-border:       #0d2a4a;
+    --ap-name:         #c8d8f0;
+    --ap-model:        #2a5070;
+    --ap-stat:         #1a5070;
+    --ap-stat-val:     #7aa8c8;
+
+    --tl-border:       #0d2a4a;
+    --tl-time:         #2a5070;
+    --tl-body:         #7aa8c8;
+
+    --empty-color:     #2a5070;
+    --footer-border:   #0d2a4a;
+    --footer-color:    #2a5070;
+  }
+
+  /* ── Theme: Slate & Amber ─────────────────────────────────── */
+  [data-theme="amber"] {
+    --font:            -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --body-bg:         #1c1f26;
+    --body-color:      #d4d8e0;
+
+    --header-bg:       #13161c;
+    --header-border:   2px solid #f59e0b;
+    --header-site:     #6b7280;
+    --header-right:    #6b7280;
+    --header-strong:   #f59e0b;
+    --logo-dot:        #f59e0b;
+
+    --card-bg:         #13161c;
+    --card-shadow:     none;
+    --card-border:     #2a2d35;
+    --card-radius:     8px;
+
+    --kpi-bg:          #13161c;
+    --kpi-value:       #ffffff;
+    --kpi-label:       #6b7280;
+    --kpi-sub:         #4b5563;
+
+    --section-color:   #f59e0b;
+    --section-border:  #2a2d35;
+    --section-weight:  800;
+    --section-font:    inherit;
+
+    --th-color:        #4b5563;
+    --th-border:       #2a2d35;
+    --td-color:        #9ca3af;
+    --td-border:       #1e2128;
+    --tr-hover:        #1a1d24;
+
+    --badge-green-bg:  #052e16; --badge-green-fg:  #4ade80;
+    --badge-red-bg:    #2d0a0a; --badge-red-fg:    #f87171;
+    --badge-yellow-bg: #2d1f00; --badge-yellow-fg: #fbbf24;
+    --badge-blue-bg:   #0a1628; --badge-blue-fg:   #60a5fa;
+    --badge-purple-bg: #180a28; --badge-purple-fg: #c084fc;
+    --badge-gray-bg:   #1e2128; --badge-gray-fg:   #6b7280;
+    --badge-radius:    4px;
+    --badge-border:    none;
+
+    --ap-bg:           #13161c;
+    --ap-border:       #2a2d35;
+    --ap-name:         #e2e8f0;
+    --ap-model:        #4b5563;
+    --ap-stat:         #4b5563;
+    --ap-stat-val:     #9ca3af;
+
+    --tl-border:       #2a2d35;
+    --tl-time:         #4b5563;
+    --tl-body:         #9ca3af;
+
+    --empty-color:     #4b5563;
+    --footer-border:   #2a2d35;
+    --footer-color:    #4b5563;
+  }
+
+  /* ── Theme: Deep Navy ─────────────────────────────────────── */
+  [data-theme="navy"] {
+    --font:            -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --body-bg:         #0f1729;
+    --body-color:      #cbd5e1;
+
+    --header-bg:       rgba(15,23,41,.98);
+    --header-border:   1px solid rgba(59,130,246,.2);
+    --header-site:     #475569;
+    --header-right:    #475569;
+    --header-strong:   #e2e8f0;
+    --logo-dot:        #3b82f6;
+
+    --card-bg:         rgba(255,255,255,.04);
+    --card-shadow:     none;
+    --card-border:     rgba(255,255,255,.08);
+    --card-radius:     16px;
+
+    --kpi-bg:          rgba(255,255,255,.04);
+    --kpi-value:       #f1f5f9;
+    --kpi-label:       #475569;
+    --kpi-sub:         #334155;
+
+    --section-color:   #64748b;
+    --section-border:  rgba(255,255,255,.07);
+    --section-weight:  600;
+    --section-font:    inherit;
+
+    --th-color:        #334155;
+    --th-border:       rgba(255,255,255,.05);
+    --td-color:        #94a3b8;
+    --td-border:       rgba(255,255,255,.04);
+    --tr-hover:        rgba(59,130,246,.06);
+
+    --badge-green-bg:  rgba(34,197,94,.15);  --badge-green-fg:  #4ade80;
+    --badge-red-bg:    rgba(239,68,68,.15);  --badge-red-fg:    #f87171;
+    --badge-yellow-bg: rgba(245,158,11,.15); --badge-yellow-fg: #fbbf24;
+    --badge-blue-bg:   rgba(59,130,246,.15); --badge-blue-fg:   #60a5fa;
+    --badge-purple-bg: rgba(139,92,246,.15); --badge-purple-fg: #a78bfa;
+    --badge-gray-bg:   rgba(255,255,255,.07);--badge-gray-fg:   #64748b;
+    --badge-radius:    999px;
+    --badge-border:    none;
+
+    --ap-bg:           rgba(255,255,255,.04);
+    --ap-border:       rgba(255,255,255,.08);
+    --ap-name:         #e2e8f0;
+    --ap-model:        #334155;
+    --ap-stat:         #334155;
+    --ap-stat-val:     #94a3b8;
+
+    --tl-border:       rgba(255,255,255,.06);
+    --tl-time:         #334155;
+    --tl-body:         #94a3b8;
+
+    --empty-color:     #334155;
+    --footer-border:   rgba(255,255,255,.06);
+    --footer-color:    #334155;
+  }
+
+  /* ── Base styles (use tokens) ─────────────────────────────── */
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a2e; }
+  body { font-family: var(--font); background: var(--body-bg); color: var(--body-color); transition: background .3s, color .3s; }
 
   .header {
-    background: linear-gradient(135deg, #0c1a3a 0%, #1a3a6b 100%);
+    background: var(--header-bg);
+    border-bottom: var(--header-border);
     color: white; padding: 32px 40px;
     display: flex; justify-content: space-between; align-items: center;
+    position: relative;
+  }
+  /* Terminal scanline overlay */
+  [data-theme="terminal"] .header::before {
+    content: '';
+    position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,200,255,.012) 2px, rgba(0,200,255,.012) 4px);
   }
   .header-left h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.5px; }
-  .header-left .site { font-size: 14px; color: #7eb3ff; margin-top: 4px; }
-  .header-right { text-align: right; font-size: 13px; color: #a0bce0; }
-  .header-right strong { color: white; font-size: 15px; display: block; margin-bottom: 2px; }
-  .logo-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #7eb3ff; margin-bottom: 12px; }
-  .logo-dot { width: 10px; height: 10px; background: #0066ff; border-radius: 50%; }
+  .header-left .site { font-size: 14px; color: var(--header-site); margin-top: 4px; }
+  .header-right { text-align: right; font-size: 13px; color: var(--header-right); }
+  .header-right strong { color: var(--header-strong); font-size: 15px; display: block; margin-bottom: 2px; }
+  .logo-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--header-site); margin-bottom: 12px; }
+  .logo-dot { width: 10px; height: 10px; background: var(--logo-dot); border-radius: 50%; }
+  [data-theme="terminal"] .logo-dot { box-shadow: 0 0 6px var(--logo-dot); animation: blink 2s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* Theme picker */
+  .theme-picker {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(0,0,0,.25); border-radius: 20px;
+    padding: 5px 10px; margin-top: 10px;
+  }
+  .theme-picker span { font-size: 10px; color: rgba(255,255,255,.4); letter-spacing: 1px; text-transform: uppercase; margin-right: 4px; }
+  .tp-btn {
+    width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent;
+    cursor: pointer; transition: transform .15s, border-color .15s;
+    padding: 0; outline: none;
+  }
+  .tp-btn:hover { transform: scale(1.2); }
+  .tp-btn.active { border-color: rgba(255,255,255,.8); transform: scale(1.15); }
+  .tp-light  { background: linear-gradient(135deg, #e2e8f0, #cbd5e1); }
+  .tp-terminal { background: linear-gradient(135deg, #00d4ff, #00ff88); }
+  .tp-amber  { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .tp-navy   { background: linear-gradient(135deg, #3b82f6, #8b5cf6); }
 
   .container { width: 90%; max-width: 960px; margin: 0 auto; padding: 32px 20px; }
 
   /* KPI cards */
   .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
-  .kpi-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); border-top: 3px solid transparent; }
-  .kpi-card.wan  { border-color: {% if wan_up %}#22c55e{% else %}#ef4444{% endif %}; }
-  .kpi-card.clients  { border-color: #3b82f6; }
-  .kpi-card.aps  { border-color: #8b5cf6; }
-  .kpi-card.alerts { border-color: {% if alarm_count > 0 %}#ef4444{% else %}#22c55e{% endif %}; }
-  .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: #6b7280; margin-bottom: 8px; }
-  .kpi-value { font-size: 32px; font-weight: 700; color: #111827; line-height: 1; }
-  .kpi-sub { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+  .kpi-card { background: var(--kpi-bg); border-radius: var(--card-radius); padding: 20px; box-shadow: var(--card-shadow); border: 1px solid var(--card-border); border-top: 3px solid transparent; }
+  .kpi-card.wan  { border-top-color: {% if wan_up %}#22c55e{% else %}#ef4444{% endif %}; }
+  .kpi-card.clients  { border-top-color: #3b82f6; }
+  .kpi-card.aps  { border-top-color: #8b5cf6; }
+  .kpi-card.alerts { border-top-color: {% if alarm_count > 0 %}#ef4444{% else %}#22c55e{% endif %}; }
+  .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--kpi-label); margin-bottom: 8px; }
+  .kpi-value { font-size: 32px; font-weight: 700; color: var(--kpi-value); line-height: 1; }
+  .kpi-sub { font-size: 12px; color: var(--kpi-sub); margin-top: 6px; }
 
   /* Layout */
   .section { margin-bottom: 28px; }
-  .section-title { font-size: 13px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
-  .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .section-title { font-size: 13px; font-weight: var(--section-weight); font-family: var(--section-font); color: var(--section-color); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--section-border); }
+  .card { background: var(--card-bg); border-radius: var(--card-radius); padding: 20px; box-shadow: var(--card-shadow); border: 1px solid var(--card-border); }
 
   /* Tables */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #6b7280; border-bottom: 2px solid #f3f4f6; }
-  td { padding: 9px 12px; border-bottom: 1px solid #f3f4f6; color: #374151; vertical-align: middle; }
+  th { text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--th-color); border-bottom: 2px solid var(--th-border); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--td-border); color: var(--td-color); vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #fafafa; }
+  tr:hover td { background: var(--tr-hover); }
 
   /* Badges */
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .badge-green  { background: #dcfce7; color: #16a34a; }
-  .badge-red    { background: #fee2e2; color: #dc2626; }
-  .badge-yellow { background: #fef3c7; color: #d97706; }
-  .badge-blue   { background: #dbeafe; color: #1d4ed8; }
-  .badge-purple { background: #ede9fe; color: #7c3aed; }
-  .badge-gray   { background: #f3f4f6; color: #6b7280; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: var(--badge-radius); font-size: 11px; font-weight: 600; border: var(--badge-border); }
+  .badge-green  { background: var(--badge-green-bg);  color: var(--badge-green-fg); }
+  .badge-red    { background: var(--badge-red-bg);    color: var(--badge-red-fg); }
+  .badge-yellow { background: var(--badge-yellow-bg); color: var(--badge-yellow-fg); }
+  .badge-blue   { background: var(--badge-blue-bg);   color: var(--badge-blue-fg); }
+  .badge-purple { background: var(--badge-purple-bg); color: var(--badge-purple-fg); }
+  .badge-gray   { background: var(--badge-gray-bg);   color: var(--badge-gray-fg); }
 
   /* AP grid */
   .ap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .ap-card { background: #f9fafb; border-radius: 10px; padding: 14px; border: 1px solid #e5e7eb; }
-  .ap-name { font-weight: 600; font-size: 13px; color: #111827; margin-bottom: 2px; }
-  .ap-model { font-size: 11px; color: #9ca3af; margin-bottom: 10px; }
-  .ap-stat { display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
-  .ap-stat span:last-child { color: #374151; font-weight: 500; }
+  .ap-card { background: var(--ap-bg); border-radius: 10px; padding: 14px; border: 1px solid var(--ap-border); }
+  .ap-name { font-weight: 600; font-size: 13px; color: var(--ap-name); margin-bottom: 2px; }
+  .ap-model { font-size: 11px; color: var(--ap-model); margin-bottom: 10px; }
+  .ap-stat { display: flex; justify-content: space-between; font-size: 12px; color: var(--ap-stat); margin-bottom: 4px; }
+  .ap-stat span:last-child { color: var(--ap-stat-val); font-weight: 500; }
   .ap-status { margin-top: 8px; }
 
   /* Event timeline */
   .timeline { list-style: none; }
-  .timeline li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 13px; align-items: flex-start; }
+  .timeline li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--tl-border); font-size: 13px; align-items: flex-start; }
   .timeline li:last-child { border-bottom: none; }
-  .tl-time { color: #9ca3af; min-width: 140px; font-size: 12px; padding-top: 2px; }
+  .tl-time { color: var(--tl-time); min-width: 140px; font-size: 12px; padding-top: 2px; }
   .tl-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; font-weight: 700; }
-  .tl-icon.crit { background: #fee2e2; color: #dc2626; }
-  .tl-icon.warn { background: #fef3c7; color: #d97706; }
-  .tl-icon.ok   { background: #dcfce7; color: #16a34a; }
-  .tl-icon.info { background: #dbeafe; color: #1d4ed8; }
-  .tl-body { flex: 1; color: #374151; }
+  .tl-icon.crit { background: var(--badge-red-bg);    color: var(--badge-red-fg); }
+  .tl-icon.warn { background: var(--badge-yellow-bg); color: var(--badge-yellow-fg); }
+  .tl-icon.ok   { background: var(--badge-green-bg);  color: var(--badge-green-fg); }
+  .tl-icon.info { background: var(--badge-blue-bg);   color: var(--badge-blue-fg); }
+  .tl-body { flex: 1; color: var(--tl-body); }
 
   /* Empty state */
-  .empty { color: #9ca3af; font-size: 13px; text-align: center; padding: 24px 0; }
+  .empty { color: var(--empty-color); font-size: 13px; text-align: center; padding: 24px 0; }
 
-  .footer { text-align: center; font-size: 12px; color: #9ca3af; padding: 24px; border-top: 1px solid #e5e7eb; margin-top: 8px; }
+  .footer { text-align: center; font-size: 12px; color: var(--footer-color); padding: 24px; border-top: 1px solid var(--footer-border); margin-top: 8px; }
 
   details summary::-webkit-details-marker { display: none; }
   details summary { list-style: none; }
@@ -92,6 +358,13 @@
     <div class="logo-row"><div class="logo-dot"></div> Ubiquiti UniFi</div>
     <h1>Network Health Report</h1>
     <div class="site">{{ site_name }}</div>
+    <div class="theme-picker" title="Choose a theme">
+      <span>Theme</span>
+      <button class="tp-btn tp-light"    onclick="setTheme('light')"    title="Light"></button>
+      <button class="tp-btn tp-terminal" onclick="setTheme('terminal')" title="Dark Terminal"></button>
+      <button class="tp-btn tp-amber"    onclick="setTheme('amber')"    title="Slate &amp; Amber"></button>
+      <button class="tp-btn tp-navy"     onclick="setTheme('navy')"     title="Deep Navy"></button>
+    </div>
   </div>
   <div class="header-right">
     <strong>{{ generated_at }}</strong>
@@ -470,7 +743,7 @@
                   {% if r.devices %}
                     <details>
                       <summary style="cursor:pointer; list-style:none; color:#3b82f6; font-size:12px;">{{ r.device_count }} device{{ 's' if r.device_count != 1 }}</summary>
-                      <div style="margin-top:4px; font-size:11px; line-height:1.8;">{{ r.devices | join('<br>') }}</div>
+                      <div style="margin-top:4px; font-size:11px; line-height:1.8;">{% for d in r.devices %}{{ d }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
                     </details>
                   {% else %}
                     <span style="color:#9ca3af;">All</span>
@@ -544,7 +817,7 @@
     {# ── Firewall Groups — shown regardless of user rule count ── #}
     {% if firewall.available and firewall.groups %}
     <div class="card" style="margin-top:12px;">
-      <details>
+      <details open>
         <summary style="cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:2px 0;">
           <span style="font-size:10px; color:#6b7280;">▶</span>
           <span style="font-weight:700; font-size:13px; color:#111827;">Firewall Groups</span>
@@ -560,13 +833,11 @@
                 <td><span class="badge badge-gray" style="font-size:11px;">{{ g.type }}</span></td>
                 <td style="font-size:12px; color:#374151;">
                   {% if g.members %}
-                    {% if g.count <= 5 %}
-                      <span style="font-family:monospace; font-size:11px; line-height:1.8;">{{ g.members | join('<br>') }}</span>
-                    {% else %}
-                      <details>
-                        <summary style="cursor:pointer; list-style:none; color:#3b82f6; font-size:12px;">{{ g.count }} members</summary>
-                        <div style="margin-top:4px; font-family:monospace; font-size:11px; line-height:1.8;">{{ g.members | join('<br>') }}</div>
-                      </details>
+                    <span style="font-family:monospace; font-size:11px; line-height:1.9; color:#374151;">
+                      {% for m in g.members %}{{ m }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    </span>
+                    {% if g.count > 1 %}
+                      <span style="font-size:11px; color:#9ca3af;"> ({{ g.count }})</span>
                     {% endif %}
                   {% else %}
                     <span style="color:#9ca3af;">empty</span>
@@ -914,5 +1185,33 @@
   <a href="https://fryguy.net" target="_blank">fryguy.net</a>
 </div>
 
+<script>
+  (function () {
+    var THEMES = ['light', 'terminal', 'amber', 'navy'];
+    var KEY    = 'unifi-report-theme';
+
+    function applyTheme(t) {
+      if (!THEMES.includes(t)) t = 'light';
+      document.documentElement.setAttribute('data-theme', t === 'light' ? '' : t);
+      document.querySelectorAll('.tp-btn').forEach(function (btn) {
+        btn.classList.toggle('active', btn.title.toLowerCase().replace(/\s.+/, '') === t ||
+          (t === 'light' && btn.classList.contains('tp-light')) ||
+          (t === 'terminal' && btn.classList.contains('tp-terminal')) ||
+          (t === 'amber' && btn.classList.contains('tp-amber')) ||
+          (t === 'navy' && btn.classList.contains('tp-navy')));
+      });
+    }
+
+    window.setTheme = function (t) {
+      try { localStorage.setItem(KEY, t); } catch(e) {}
+      applyTheme(t);
+    };
+
+    // Restore saved theme on load
+    var saved = 'light';
+    try { saved = localStorage.getItem(KEY) || 'light'; } catch(e) {}
+    applyTheme(saved);
+  })();
+</script>
 </body>
 </html>
