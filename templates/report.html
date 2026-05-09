@@ -301,7 +301,13 @@
 
   /* Layout */
   .section { margin-bottom: 28px; }
-  .section-title { font-size: 13px; font-weight: var(--section-weight); font-family: var(--section-font); color: var(--section-color); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--section-border); }
+  .section-title { font-size: 13px; font-weight: var(--section-weight); font-family: var(--section-font); color: var(--section-color); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid var(--section-border); cursor: pointer; user-select: none; display: flex; align-items: center; }
+  .section-title-text { flex: 1; }
+  .section-chevron { flex-shrink: 0; margin-left: 10px; font-style: normal; font-weight: 400; font-size: 13px; color: var(--kpi-sub); transition: transform .2s ease; line-height: 1; }
+  .section.collapsed .section-chevron { transform: rotate(-90deg); }
+  .section.collapsed .section-title { margin-bottom: 0; border-bottom-color: transparent; }
+  .section-body { }
+  .section.collapsed .section-body { display: none; }
   .card { background: var(--card-bg); border-radius: var(--card-radius); padding: 20px; box-shadow: var(--card-shadow); border: 1px solid var(--card-border); }
 
   /* Tables */
@@ -654,6 +660,56 @@
     });
   })();
   </script>
+  {% endif %}
+
+  {# ── TRAFFIC ANALYSIS ─────────────────────────────────── #}
+  {% if client_stats.available %}
+  <div class="section">
+    <div class="section-title">Traffic Analysis
+      <span class="badge badge-gray" style="margin-left:8px; font-size:11px; text-transform:none; letter-spacing:0; vertical-align:middle;">
+        24 h · {{ client_stats.total_clients }} clients · {{ client_stats.total_bytes }}
+      </span>
+    </div>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:32px;">#</th>
+            <th>Client</th>
+            <th style="width:110px; text-align:right;">Download</th>
+            <th style="width:110px; text-align:right;">Upload</th>
+            <th style="width:120px; text-align:right;">Total</th>
+            <th style="min-width:120px;">Usage</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for c in client_stats.clients %}
+          <tr>
+            <td style="color:var(--kpi-sub); font-size:11px; text-align:center;">{{ loop.index }}</td>
+            <td>
+              <span style="font-size:13px; font-weight:600; color:var(--td-color);">{{ c.name }}</span>
+              <span style="font-size:10px; color:var(--kpi-sub); margin-left:6px; font-family:monospace;">{{ c.mac }}</span>
+            </td>
+            <td style="text-align:right; font-size:13px; color:#3b82f6;">{{ c.rx }}</td>
+            <td style="text-align:right; font-size:13px; color:#10b981;">{{ c.tx }}</td>
+            <td style="text-align:right; font-size:13px; font-weight:600; color:var(--kpi-value);">{{ c.total }}</td>
+            <td style="padding-right:16px;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <div style="flex:1; background:var(--th-border); border-radius:2px; height:6px; overflow:hidden;">
+                  <div style="height:100%; width:{{ c.bar_pct }}%; background:linear-gradient(90deg,#3b82f6,#6366f1); border-radius:2px; transition:width .3s;"></div>
+                </div>
+                <span style="font-size:11px; color:var(--kpi-sub); min-width:34px; text-align:right;">{{ c.pct }}%</span>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div style="padding:10px 16px; border-top:1px solid var(--td-border); font-size:11px; color:var(--kpi-sub);">
+        ℹ️ Per-app DPI breakdown requires Traffic Identification to be enabled in your controller settings and may not be available on all firmware versions. Totals reflect session-level bytes recorded over the past 24 hours.
+      </div>
+    </div>
+  </div>
   {% endif %}
 
   {# ── WLAN + VPN ────────────────────────────────────────── #}
@@ -1370,6 +1426,68 @@
     var saved = 'light';
     try { saved = localStorage.getItem(KEY) || 'light'; } catch(e) {}
     applyTheme(saved);
+  })();
+</script>
+
+<script>
+  /* ── Collapsible Sections ─────────────────────────────────────── */
+  (function () {
+    var CKEY = 'unifi-collapsed-sections';
+
+    function getCollapsed() {
+      try { return JSON.parse(localStorage.getItem(CKEY) || '[]'); } catch(e) { return []; }
+    }
+    function saveCollapsed() {
+      var ids = [];
+      document.querySelectorAll('.section[data-sid].collapsed').forEach(function(s) {
+        ids.push(s.dataset.sid);
+      });
+      try { localStorage.setItem(CKEY, JSON.stringify(ids)); } catch(e) {}
+    }
+
+    var collapsed = getCollapsed();
+
+    document.querySelectorAll('.section').forEach(function(section, idx) {
+      // Find the direct-child section-title
+      var title = null;
+      for (var i = 0; i < section.children.length; i++) {
+        if (section.children[i].classList.contains('section-title')) {
+          title = section.children[i]; break;
+        }
+      }
+      if (!title) return;
+
+      // Derive a stable ID from the section heading text (first 3 words)
+      var sid = (title.textContent || '').trim()
+                  .replace(/[^\w\s]/g, '').split(/\s+/).slice(0, 3)
+                  .join('-').toLowerCase() || ('sec-' + idx);
+      section.dataset.sid = sid;
+
+      // Wrap title text + any existing inline elements in a flex-filling span
+      var titleHTML = title.innerHTML;
+      title.innerHTML = '<span class="section-title-text">' + titleHTML + '</span>'
+                      + '<em class="section-chevron">&#9660;</em>';
+
+      // Wrap all siblings after the title into a .section-body div
+      var body = document.createElement('div');
+      body.className = 'section-body';
+      var kids = Array.from(section.children);
+      kids.forEach(function(k) {
+        if (!k.classList.contains('section-title')) body.appendChild(k);
+      });
+      section.appendChild(body);
+
+      // Click to toggle
+      title.addEventListener('click', function() {
+        section.classList.toggle('collapsed');
+        saveCollapsed();
+      });
+
+      // Restore persisted state
+      if (collapsed.indexOf(sid) !== -1) {
+        section.classList.add('collapsed');
+      }
+    });
   })();
 </script>
 </body>

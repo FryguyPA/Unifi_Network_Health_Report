@@ -206,6 +206,37 @@ class UnifiClient:
         except Exception:
             return []
 
+    def get_client_stats(self, hours=24):
+        """Per-client bandwidth history via stat/report/daily.user.
+
+        Returns a list of raw records from the controller — each record has
+        'mac', 'tx_bytes', 'rx_bytes', and 'time'.  Multiple records may
+        exist per client (one per reporting interval) and are summed by the
+        caller.  Uses millisecond timestamps as required by the report API.
+        """
+        import time as _time
+        end_s   = int(_time.time())
+        start_s = end_s - (hours * 3600)
+        payload = {
+            "attrs": ["mac", "tx_bytes", "rx_bytes", "time"],
+            "start": start_s * 1000,
+            "end":   end_s   * 1000,
+        }
+        path = f"/api/s/{self.site}/stat/report/daily.user"
+        try:
+            url  = self._api_url(path)
+            resp = self.session.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            records = data.get("data", data)
+            if not isinstance(records, list):
+                return []
+            log.debug("get_client_stats: %d record(s)", len(records))
+            return records
+        except Exception as e:
+            log.debug("get_client_stats failed (%s)", e)
+            return []
+
     def get_port_forward(self):
         """Port forward rules."""
         return self._get(f"/api/s/{self.site}/rest/portforward")
@@ -310,4 +341,5 @@ class UnifiClient:
             "traffic_routes":    _safe("traffic_routes",    self.get_traffic_routes,    []),
             "port_forwards":     _safe("port_forwards",     self.get_port_forwards,     []),
             "wan_stats":         _safe("wan_stats",         self.get_wan_stats,         []),
+            "client_stats":      _safe("client_stats",      self.get_client_stats,      []),
         }

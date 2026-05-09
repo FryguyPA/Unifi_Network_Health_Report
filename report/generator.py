@@ -846,6 +846,78 @@ def _process_wan_stats(records, granularity="hourly"):
     }
 
 
+def _process_client_stats(records, connected_clients, all_clients_list):
+    """Aggregate per-client 24 h bandwidth from stat/report/daily.user records.
+
+    Returns a dict with:
+      available      – bool
+      clients        – top-20 list, sorted by total bytes desc
+      total_clients  – count of unique MACs seen
+      total_bytes    – formatted string for all traffic combined
+    """
+    if not records:
+        return {"available": False, "clients": [], "total_clients": 0, "total_bytes": "—"}
+
+    # Build MAC → display name lookup (all_clients gives historical data,
+    # connected_clients gives fresher hostnames — connected wins on conflict)
+    mac_to_name: dict = {}
+    for c in all_clients_list:
+        mac = (c.get("mac") or "").lower()
+        if mac:
+            mac_to_name[mac] = c.get("hostname") or c.get("name") or mac
+    for c in connected_clients:
+        mac = (c.get("mac") or "").lower()
+        if mac:
+            name = c.get("hostname") or c.get("name") or mac
+            mac_to_name[mac] = name
+
+    # Aggregate bytes per MAC (multiple daily records may exist per client).
+    # NA 10.x returns the MAC in "user" or "oid" rather than "mac".
+    by_mac: dict = {}
+    for r in records:
+        mac = (r.get("mac") or r.get("user") or r.get("oid") or "").lower()
+        if not mac:
+            continue
+        entry = by_mac.setdefault(mac, {"tx_bytes": 0, "rx_bytes": 0})
+        entry["tx_bytes"] += int(r.get("tx_bytes", 0) or 0)
+        entry["rx_bytes"] += int(r.get("rx_bytes", 0) or 0)
+
+    if not by_mac:
+        return {"available": False, "clients": [], "total_clients": 0, "total_bytes": "—"}
+
+    total_bytes_all = sum(v["tx_bytes"] + v["rx_bytes"] for v in by_mac.values())
+
+    rows = []
+    for mac, stats in by_mac.items():
+        total = stats["tx_bytes"] + stats["rx_bytes"]
+        rows.append({
+            "mac":         mac,
+            "name":        mac_to_name.get(mac, mac),
+            "tx_bytes":    stats["tx_bytes"],
+            "rx_bytes":    stats["rx_bytes"],
+            "total_bytes": total,
+            "tx":          _bytes_to_human(stats["tx_bytes"]),
+            "rx":          _bytes_to_human(stats["rx_bytes"]),
+            "total":       _bytes_to_human(total),
+            "pct":         round(total / max(total_bytes_all, 1) * 100, 1),
+        })
+
+    rows.sort(key=lambda x: x["total_bytes"], reverse=True)
+    top = rows[:20]
+
+    # Bar width relative to the top consumer (not total) for visual clarity
+    max_bytes = top[0]["total_bytes"] if top else 1
+    for r in top:
+        r["bar_pct"] = round(r["total_bytes"] / max(max_bytes, 1) * 100, 1)
+
+    return {
+        "available":     True,
+        "clients":       top,
+        "total_clients": len(by_mac),
+        "total_bytes":   _bytes_to_human(total_bytes_all),
+    }
+
+
 def _process_inventory(all_clients_list, local_tz):
     """Process rest/user records into a client inventory table and device-type breakdown.
 
@@ -1023,6 +1095,11 @@ def build_report(raw_data, config):
     )
     port_forwards   = _process_port_forwards(raw_data.get("port_forwards", []))
     wan_stats       = _process_wan_stats(raw_data.get("wan_stats", []))
+    client_stats    = _process_client_stats(
+        raw_data.get("client_stats",  []),
+        raw_data.get("clients",       []),
+        raw_data.get("all_clients",   []),
+    )
     recommendations = _build_recommendations(aps, switches, health, alarms, thresholds,
                                              firewall.get("flags", []))
 
@@ -1099,6 +1176,9 @@ def build_report(raw_data, config):
 
         # WAN utilization chart
         "wan_stats": wan_stats,
+
+        # Per-client 24 h bandwidth (Traffic Analysis)
+        "client_stats": client_stats,
 
         # Events & alerts
         "events": events,
