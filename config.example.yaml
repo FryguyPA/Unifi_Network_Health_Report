@@ -9,6 +9,11 @@ unifi:
   # site: "default"           # optional — if omitted, you will be prompted to choose after login
   verify_ssl: false           # set true if you have a valid cert; false for self-signed
 
+  # Optional: UniFi Network v1 API key — enables Zone Firewall Policies and DNS Policies sections.
+  # Generate one in: UniFi Network → Settings → System → Advanced → API Keys (requires NA 10.1+)
+  # Leave commented out or blank if you don't have one — those sections will simply not appear.
+  # api_key: "your-api-key-here"
+
 report:
   site_name: "My Network"     # display name shown in the report header
   output_dir: "reports"       # directory where HTML reports are saved

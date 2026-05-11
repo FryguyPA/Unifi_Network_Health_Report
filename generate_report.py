@@ -98,6 +98,7 @@ def main():
         username=unifi_cfg["username"],
         password=unifi_cfg["password"],
         verify_ssl=unifi_cfg.get("verify_ssl", False),
+        api_key=unifi_cfg.get("api_key", ""),
     )
 
     try:
@@ -109,9 +110,10 @@ def main():
         raw_data = client.collect_report_data()
 
         log.info("Building report…")
-        _, output_path = build_report(raw_data, config)
+        _, output_path, snapshot_path = build_report(raw_data, config)
 
-        print(f"\n  Report saved → {output_path}\n")
+        print(f"\n  Report saved   → {output_path}")
+        print(f"  Snapshot saved → {snapshot_path}\n")
 
         if args.open_browser:
             webbrowser.open(f"file://{os.path.abspath(output_path)}")

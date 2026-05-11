@@ -846,32 +846,47 @@ def _process_wan_stats(records, granularity="hourly"):
     }
 
 
-def _process_client_stats(records, connected_clients, all_clients_list):
+def _process_client_stats(records, connected_clients, all_clients_list,
+                          hourly_records=None):
     """Aggregate per-client 24 h bandwidth from stat/report/daily.user records.
 
+    Also builds:
+      category_breakdown – traffic grouped by device-type category (Computers,
+                           Phones, IoT, Media, Gaming …) using dev_cat fingerprints
+      hourly_pattern     – total bytes per clock-hour across all clients, for
+                           the "when is bandwidth being used" chart
+
     Returns a dict with:
-      available      – bool
-      clients        – top-20 list, sorted by total bytes desc
-      total_clients  – count of unique MACs seen
-      total_bytes    – formatted string for all traffic combined
+      available          – bool
+      clients            – top-20 list, sorted by total bytes desc
+      total_clients      – count of unique MACs seen
+      total_bytes        – formatted string for all traffic combined
+      category_breakdown – list of {label, bytes, pct, bar_pct, human}
+      hourly_pattern     – list of 24 {hour, label, bytes, mbps} dicts (or [])
     """
     if not records:
-        return {"available": False, "clients": [], "total_clients": 0, "total_bytes": "—"}
+        return {
+            "available": False, "clients": [], "total_clients": 0,
+            "total_bytes": "—", "category_breakdown": [], "hourly_pattern": [],
+        }
 
-    # Build MAC → display name lookup (all_clients gives historical data,
-    # connected_clients gives fresher hostnames — connected wins on conflict)
-    mac_to_name: dict = {}
+    # Build MAC → display name AND MAC → dev_cat group lookups
+    mac_to_name:  dict = {}
+    mac_to_group: dict = {}
     for c in all_clients_list:
         mac = (c.get("mac") or "").lower()
-        if mac:
-            mac_to_name[mac] = c.get("hostname") or c.get("name") or mac
+        if not mac:
+            continue
+        mac_to_name[mac]  = c.get("hostname") or c.get("name") or mac
+        dev_cat = c.get("dev_cat")
+        mac_to_group[mac] = _DEV_CAT_GROUP.get(dev_cat, "Unknown") if dev_cat is not None else "Unknown"
+    # Connected clients have fresher hostnames — let them win
     for c in connected_clients:
         mac = (c.get("mac") or "").lower()
         if mac:
-            name = c.get("hostname") or c.get("name") or mac
-            mac_to_name[mac] = name
+            mac_to_name[mac] = c.get("hostname") or c.get("name") or mac
 
-    # Aggregate bytes per MAC (multiple daily records may exist per client).
+    # ── Per-MAC daily aggregation ─────────────────────────────────
     # NA 10.x returns the MAC in "user" or "oid" rather than "mac".
     by_mac: dict = {}
     for r in records:
@@ -883,10 +898,14 @@ def _process_client_stats(records, connected_clients, all_clients_list):
         entry["rx_bytes"] += int(r.get("rx_bytes", 0) or 0)
 
     if not by_mac:
-        return {"available": False, "clients": [], "total_clients": 0, "total_bytes": "—"}
+        return {
+            "available": False, "clients": [], "total_clients": 0,
+            "total_bytes": "—", "category_breakdown": [], "hourly_pattern": [],
+        }
 
     total_bytes_all = sum(v["tx_bytes"] + v["rx_bytes"] for v in by_mac.values())
 
+    # ── Top-20 client rows ────────────────────────────────────────
     rows = []
     for mac, stats in by_mac.items():
         total = stats["tx_bytes"] + stats["rx_bytes"]
@@ -904,17 +923,69 @@ def _process_client_stats(records, connected_clients, all_clients_list):
 
     rows.sort(key=lambda x: x["total_bytes"], reverse=True)
     top = rows[:20]
-
-    # Bar width relative to the top consumer (not total) for visual clarity
     max_bytes = top[0]["total_bytes"] if top else 1
     for r in top:
         r["bar_pct"] = round(r["total_bytes"] / max(max_bytes, 1) * 100, 1)
 
+    # ── Category breakdown ────────────────────────────────────────
+    # Group aggregated bytes by the device-category group for each MAC.
+    _GROUP_ORDER = ["Computers", "Phones", "IoT", "Media", "Gaming",
+                    "Cameras", "Printers", "Network", "Other", "Unknown"]
+    cat_bytes: dict = {}
+    for mac, stats in by_mac.items():
+        group = mac_to_group.get(mac, "Unknown")
+        cat_bytes[group] = cat_bytes.get(group, 0) + stats["tx_bytes"] + stats["rx_bytes"]
+
+    cat_max = max(cat_bytes.values(), default=1)
+    category_breakdown = []
+    for grp in _GROUP_ORDER:
+        b = cat_bytes.get(grp, 0)
+        if b == 0:
+            continue
+        category_breakdown.append({
+            "label":   grp,
+            "bytes":   b,
+            "human":   _bytes_to_human(b),
+            "pct":     round(b / max(total_bytes_all, 1) * 100, 1),
+            "bar_pct": round(b / cat_max * 100, 1),
+        })
+
+    # ── Hourly activity pattern ───────────────────────────────────
+    hourly_pattern = []
+    if hourly_records:
+        from datetime import datetime, timezone
+        by_hour: dict = {}   # hour-of-day (0-23) → total bytes
+        for r in hourly_records:
+            ts_ms = r.get("time", 0)
+            ts_s  = ts_ms / 1000 if ts_ms > 1e10 else ts_ms
+            try:
+                hour = datetime.fromtimestamp(ts_s, tz=timezone.utc).hour
+            except Exception:
+                continue
+            tx = int(r.get("tx_bytes", 0) or 0)
+            rx = int(r.get("rx_bytes", 0) or 0)
+            by_hour[hour] = by_hour.get(hour, 0) + tx + rx
+
+        if by_hour:
+            max_h_bytes = max(by_hour.values(), default=1)
+            for h in range(24):
+                b = by_hour.get(h, 0)
+                label = datetime(2000, 1, 1, h).strftime("%-I %p")
+                hourly_pattern.append({
+                    "hour":    h,
+                    "label":   label,
+                    "bytes":   b,
+                    "mbps":    round((b * 8) / 3_600_000_000, 2),
+                    "bar_pct": round(b / max_h_bytes * 100, 1),
+                })
+
     return {
-        "available":     True,
-        "clients":       top,
-        "total_clients": len(by_mac),
-        "total_bytes":   _bytes_to_human(total_bytes_all),
+        "available":          True,
+        "clients":            top,
+        "total_clients":      len(by_mac),
+        "total_bytes":        _bytes_to_human(total_bytes_all),
+        "category_breakdown": category_breakdown,
+        "hourly_pattern":     hourly_pattern,
     }
 
 
@@ -1055,11 +1126,279 @@ def _build_recommendations(aps, switches, health, alarms, thresholds, firewall_f
 
 
 # ------------------------------------------------------------------
+# v1 API processors
+# ------------------------------------------------------------------
+
+def _summarize_traffic_filter(f, net_map):
+    """Return a concise human-readable string for a v1 trafficFilter object."""
+    if not f:
+        return "Any"
+    ftype = f.get("type", "")
+    if ftype == "NETWORK":
+        nf   = f.get("networkFilter", {})
+        ids  = nf.get("networkIds", [])
+        names = [net_map.get(i, i[:8] + "…") for i in ids]
+        opp  = " (inverted)" if nf.get("matchOpposite") else ""
+        return (", ".join(names) or "Any network") + opp
+    if ftype == "DOMAIN":
+        df = f.get("domainFilter", {})
+        domains = df.get("domains", [])
+        suffix = "…" if len(domains) > 3 else ""
+        return "Domains: " + ", ".join(domains[:3]) + suffix
+    if ftype == "PORT":
+        pf    = f.get("portFilter", {})
+        items = pf.get("items", [])
+        parts = []
+        for item in items[:5]:
+            if item.get("type") == "PORT_NUMBER":
+                parts.append(str(item.get("portNumber", "?")))
+            elif item.get("type") == "PORT_RANGE":
+                parts.append(f"{item.get('portRangeStart')}–{item.get('portRangeEnd')}")
+        suffix = "…" if len(items) > 5 else ""
+        return "Ports: " + ", ".join(parts) + suffix
+    if ftype == "IP_ADDRESS":
+        af    = f.get("ipAddressFilter", {})
+        items = af.get("items", [])
+        parts = []
+        for item in items[:4]:
+            if item.get("type") == "IP_CIDR":
+                parts.append(item.get("cidrIp", "?"))
+            elif item.get("type") == "IP_ADDRESS":
+                parts.append(item.get("ipAddress", "?"))
+        opp    = " (inverted)" if af.get("matchOpposite") else ""
+        suffix = "…" if len(items) > 4 else ""
+        return "IPs: " + ", ".join(parts) + opp + suffix
+    return ftype.replace("_", " ").title()
+
+
+def _process_fw_policies(policy_list, zone_list, network_list):
+    """Process v1 zone-based firewall policies.
+
+    Returns a dict with:
+      available  – bool (False when api_key absent or endpoint returned nothing)
+      policies   – display rows sorted by index
+      zones      – zone summary rows
+      total      – total policy count
+      enabled    – count of enabled policies
+    """
+    if not policy_list and not zone_list:
+        return {"available": False, "policies": [], "zones": [], "total": 0, "enabled": 0}
+
+    zone_map = {z["id"]: z["name"] for z in zone_list}
+    net_map  = {n["_id"]: n.get("name", n["_id"]) for n in network_list if "_id" in n}
+
+    rows = []
+    for p in sorted(policy_list, key=lambda x: (x.get("index", 9999), x.get("name", ""))):
+        src    = p.get("source", {})
+        dst    = p.get("destination", {})
+        action = p.get("action", {})
+        action_type = action.get("type", "ALLOW").upper()
+
+        rows.append({
+            "name":           p.get("name", "—"),
+            "enabled":        p.get("enabled", True),
+            "action":         action_type,
+            "src_zone":       zone_map.get(src.get("zoneId", ""), "Unknown"),
+            "dst_zone":       zone_map.get(dst.get("zoneId", ""), "Unknown"),
+            "src_filter":     _summarize_traffic_filter(src.get("trafficFilter"), net_map),
+            "dst_filter":     _summarize_traffic_filter(dst.get("trafficFilter"), net_map),
+            "logging":        p.get("loggingEnabled", False),
+            "return_traffic": action.get("allowReturnTraffic", False),
+            "index":          p.get("index", 0),
+        })
+
+    zone_rows = []
+    for z in zone_list:
+        meta = z.get("metadata", {})
+        zone_rows.append({
+            "name":          z["name"],
+            "network_count": len(z.get("networkIds", [])),
+            "origin":        meta.get("origin", "").replace("_", " ").title(),
+            "configurable":  meta.get("configurable", True),
+        })
+
+    return {
+        "available": True,
+        "policies":  rows,
+        "zones":     zone_rows,
+        "total":     len(rows),
+        "enabled":   sum(1 for r in rows if r["enabled"]),
+    }
+
+
+def _process_dns_policies(policy_list):
+    """Process v1 DNS/content-filtering policies."""
+    if policy_list is None:
+        return {"available": False, "policies": []}
+    rows = []
+    for p in policy_list:
+        rows.append({
+            "name":       p.get("name", "—"),
+            "enabled":    p.get("enabled", True),
+            "action":     p.get("action", {}).get("type", "—").upper(),
+            "categories": p.get("categories", []),
+            "networks":   p.get("networkIds", []),
+        })
+    return {"available": True, "policies": rows}
+
+
+# ------------------------------------------------------------------
+# JSON snapshot
+# ------------------------------------------------------------------
+
+def _build_snapshot(ctx, raw_data):
+    """Build a compact, JSON-serialisable snapshot for historical comparison.
+
+    Includes all fields that are meaningful to diff across runs:
+    WAN status, client counts, device inventory + firmware versions,
+    WLAN/network config, alarms, recommendations, and top bandwidth clients.
+    Deliberately excludes SVG path strings, raw HTML, and bulk inventory rows.
+    """
+    # ── WAN connections ──────────────────────────────────────────
+    wan_connections = [
+        {k: v for k, v in conn.items()
+         if k in ("name", "ip", "isp", "status", "availability",
+                  "latency_avg", "uptime", "media", "speed_mbps")}
+        for conn in ctx.get("wan_connections", [])
+    ]
+
+    # ── Speedtest (drop None values for cleanliness) ──────────────
+    speedtest = {k: v for k, v in ctx.get("speedtest", {}).items() if v is not None}
+
+    # ── Devices ───────────────────────────────────────────────────
+    aps = [
+        {"name": ap["name"], "model": ap["model"], "version": ap["version"],
+         "connected": ap["connected"], "clients": ap["clients"],
+         "retry_pct": ap["retry_pct"], "satisfaction": ap.get("satisfaction"),
+         "uptime": ap["uptime"]}
+        for ap in ctx.get("aps", [])
+    ]
+    switches = [
+        {"name": sw["name"], "model": sw["model"], "version": sw["version"],
+         "connected": sw["connected"], "ports": sw["ports"],
+         "poe_used_w": sw["poe_used_w"], "poe_budget_w": sw["poe_budget_w"],
+         "port_issues": len(sw.get("port_issues", []))}
+        for sw in ctx.get("switches", [])
+    ]
+    gateways = [
+        {"name": gw["name"], "model": gw["model"], "version": gw["version"],
+         "connected": gw["connected"], "cpu_pct": gw["cpu_pct"], "mem_pct": gw["mem_pct"]}
+        for gw in ctx.get("gateways", [])
+    ]
+
+    # ── Firmware ──────────────────────────────────────────────────
+    firmware = [
+        {"name": f["name"], "type": f["type"], "model": f["model"],
+         "version": f["version"], "upgradable": f["upgradable"],
+         "upgrade_to": f.get("upgrade_to", "")}
+        for f in ctx.get("firmware", [])
+    ]
+
+    # ── WLAN ──────────────────────────────────────────────────────
+    wl = ctx.get("wlans", {})
+    wlans = {
+        "user_clients":     wl.get("user_clients", 0),
+        "guest_clients":    wl.get("guest_clients", 0),
+        "iot_clients":      wl.get("iot_clients", 0),
+        "num_aps":          wl.get("num_aps", 0),
+        "num_disconnected": wl.get("num_disconnected", 0),
+        "ssids": [
+            {"name": s["name"], "enabled": s["enabled"],
+             "security": s["security"], "bands": s["bands"], "is_guest": s["is_guest"]}
+            for s in wl.get("ssids", [])
+        ],
+    }
+
+    # ── Firewall summary ──────────────────────────────────────────
+    fw = ctx.get("firewall", {})
+    firewall = {
+        "available":    fw.get("available", False),
+        "total_rules":  fw.get("total", 0),
+        "enabled_rules": fw.get("enabled", 0),
+        "security_flags": fw.get("flags", []),
+    }
+
+    # ── Traffic / top clients ─────────────────────────────────────
+    cs = ctx.get("client_stats", {})
+    traffic = {
+        "available":     cs.get("available", False),
+        "total_clients": cs.get("total_clients"),
+        "total_bytes":   cs.get("total_bytes"),
+        "top_clients": [
+            {"name": c["name"], "mac": c["mac"],
+             "rx": c["rx"], "tx": c["tx"], "total": c["total"], "pct": c["pct"]}
+            for c in cs.get("clients", [])
+        ],
+    }
+
+    # ── Alarms ────────────────────────────────────────────────────
+    alarms = [
+        {"msg": a.get("msg", ""), "key": a.get("key", ""), "time": a.get("time")}
+        for a in ctx.get("alarms", [])
+    ]
+
+    return {
+        "collected_at":       raw_data.get("collected_at"),
+        "site_name":          ctx.get("site_name"),
+        "controller_version": ctx.get("controller_version"),
+
+        "wan": {
+            "up":         ctx.get("wan_up"),
+            "connections": wan_connections,
+            "speedtest":  speedtest,
+        },
+
+        "clients": {
+            "total":    ctx.get("client_count"),
+            "wireless": ctx.get("client_wireless"),
+            "wired":    ctx.get("client_wired"),
+            "guests":   ctx.get("client_guests"),
+            "top_consumers": ctx.get("clients", {}).get("top_consumers", []),
+        },
+
+        "devices": {
+            "aps":      aps,
+            "switches": switches,
+            "gateways": gateways,
+        },
+
+        "firmware": {
+            "upgradable_count": ctx.get("firmware_upgradable", 0),
+            "devices": firmware,
+        },
+
+        "wlans": wlans,
+
+        "networks": ctx.get("networks", []),
+
+        "vpn": ctx.get("vpn", {}),
+
+        "firewall": firewall,
+
+        "traffic_analysis": traffic,
+
+        "alarms": {
+            "count": ctx.get("alarm_count", 0),
+            "items": alarms,
+        },
+
+        "recommendations": {
+            "high":   ctx.get("rec_count_high", 0),
+            "medium": ctx.get("rec_count_medium", 0),
+            "items":  ctx.get("recommendations", []),
+        },
+    }
+
+
+# ------------------------------------------------------------------
 # Main entry point
 # ------------------------------------------------------------------
 
 def build_report(raw_data, config):
-    """Process raw API data and render the HTML report. Returns (html_str, output_path)."""
+    """Process raw API data and render the HTML report.
+
+    Returns (html_str, html_path, snapshot_path).
+    """
     report_cfg = config.get("report", {})
     site_name = report_cfg.get("site_name", "My Network")
     output_dir = report_cfg.get("output_dir", "reports")
@@ -1095,10 +1434,17 @@ def build_report(raw_data, config):
     )
     port_forwards   = _process_port_forwards(raw_data.get("port_forwards", []))
     wan_stats       = _process_wan_stats(raw_data.get("wan_stats", []))
+    _fw_pol_raw, _fw_zones_raw = raw_data.get("fw_policies", ([], []))
+    fw_policies     = _process_fw_policies(
+        _fw_pol_raw, _fw_zones_raw,
+        raw_data.get("networks", []),
+    )
+    dns_policies    = _process_dns_policies(raw_data.get("dns_policies", []))
     client_stats    = _process_client_stats(
-        raw_data.get("client_stats",  []),
-        raw_data.get("clients",       []),
-        raw_data.get("all_clients",   []),
+        raw_data.get("client_stats",        []),
+        raw_data.get("clients",             []),
+        raw_data.get("all_clients",         []),
+        hourly_records=raw_data.get("hourly_client_stats", []),
     )
     recommendations = _build_recommendations(aps, switches, health, alarms, thresholds,
                                              firewall.get("flags", []))
@@ -1177,6 +1523,10 @@ def build_report(raw_data, config):
         # WAN utilization chart
         "wan_stats": wan_stats,
 
+        # v1 API data
+        "fw_policies":  fw_policies,
+        "dns_policies": dns_policies,
+
         # Per-client 24 h bandwidth (Traffic Analysis)
         "client_stats": client_stats,
 
@@ -1196,12 +1546,24 @@ def build_report(raw_data, config):
     template = env.get_template("report.html")
     html = template.render(**ctx)
 
-    # Write output file
+    # ── Write HTML report ─────────────────────────────────────────
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    filename = f"unifi_report_{now.strftime('%Y%m%d_%H%M%S')}.html"
+    ts_str = now.strftime('%Y%m%d_%H%M%S')
+    filename = f"unifi_report_{ts_str}.html"
     output_path = os.path.join(output_dir, filename)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
-
     log.info("Report written to %s", output_path)
-    return html, output_path
+
+    # ── Write JSON snapshot ───────────────────────────────────────
+    import json
+    snapshot = _build_snapshot(ctx, raw_data)
+    json_dir = os.path.join(output_dir, "json")
+    Path(json_dir).mkdir(parents=True, exist_ok=True)
+    snapshot_filename = f"unifi_snapshot_{ts_str}.json"
+    snapshot_path = os.path.join(json_dir, snapshot_filename)
+    with open(snapshot_path, "w", encoding="utf-8") as f:
+        json.dump(snapshot, f, indent=2, default=str)
+    log.info("Snapshot written to %s", snapshot_path)
+
+    return html, output_path, snapshot_path

@@ -15,13 +15,17 @@ log = logging.getLogger(__name__)
 
 
 class UnifiClient:
-    def __init__(self, host, port, username, password, site=None, verify_ssl=False):
+    def __init__(self, host, port, username, password, site=None,
+                 verify_ssl=False, api_key=None):
         self.base_url = f"https://{host}:{port}"
         self.username = username
         self.password = password
         self.site = site
         self.verify_ssl = verify_ssl
+        self.api_key = api_key or ""
+        self.v1_site_id = None        # resolved lazily from GET /v1/sites
         self.session = requests.Session()
+        self._v1_session = None       # created lazily in _get_v1
         self._is_udm = port == 443  # UDM uses /proxy/network/ prefix
 
         if not verify_ssl:
@@ -86,6 +90,48 @@ class UnifiClient:
         if isinstance(data, list):
             return data
         return data.get("data") or data.get("events") or data.get("items") or data
+
+    def _get_v1(self, path, params=None):
+        """GET against the v1 integration API using X-API-Key auth.
+
+        Returns a list of items on success, [] when the api_key is absent or
+        the endpoint returns a non-200 status.  A separate requests.Session is
+        used so v1 auth (header-based) never interferes with the cookie session.
+        """
+        if not self.api_key:
+            return []
+
+        # Lazy-create the v1 session
+        if self._v1_session is None:
+            self._v1_session = requests.Session()
+            self._v1_session.verify = self.verify_ssl
+            self._v1_session.headers["X-API-Key"] = self.api_key
+            if not self.verify_ssl:
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        url = f"{self.base_url}/proxy/network/integration/v1{path}"
+        try:
+            resp = self._v1_session.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("data", data)
+            return items if isinstance(items, list) else []
+        except Exception as e:
+            log.debug("v1 GET %s → %s", path, e)
+            return []
+
+    def _resolve_v1_site(self):
+        """Return the v1 site UUID, resolving it from GET /v1/sites if needed."""
+        if self.v1_site_id:
+            return self.v1_site_id
+        sites = self._get_v1("/sites")
+        for s in sites:
+            if s.get("internalReference") == self.site:
+                self.v1_site_id = s["id"]
+                return self.v1_site_id
+        if sites:                        # fall back to first site
+            self.v1_site_id = sites[0]["id"]
+        return self.v1_site_id
 
     # ------------------------------------------------------------------
     # Site discovery
@@ -206,13 +252,14 @@ class UnifiClient:
         except Exception:
             return []
 
-    def get_client_stats(self, hours=24):
-        """Per-client bandwidth history via stat/report/daily.user.
+    def get_client_stats(self, hours=24, granularity="daily"):
+        """Per-client bandwidth history via stat/report/{granularity}.user.
 
-        Returns a list of raw records from the controller — each record has
-        'mac', 'tx_bytes', 'rx_bytes', and 'time'.  Multiple records may
-        exist per client (one per reporting interval) and are summed by the
-        caller.  Uses millisecond timestamps as required by the report API.
+        granularity: "daily" (one record per client per day) or
+                     "hourly" (one record per client per hour).
+        Returns raw records — each has user/oid (MAC), tx_bytes, rx_bytes, time.
+        Multiple records may exist per client per interval; callers aggregate.
+        Uses millisecond timestamps as required by the report API.
         """
         import time as _time
         end_s   = int(_time.time())
@@ -222,7 +269,7 @@ class UnifiClient:
             "start": start_s * 1000,
             "end":   end_s   * 1000,
         }
-        path = f"/api/s/{self.site}/stat/report/daily.user"
+        path = f"/api/s/{self.site}/stat/report/{granularity}.user"
         try:
             url  = self._api_url(path)
             resp = self.session.post(url, json=payload, timeout=30)
@@ -307,6 +354,29 @@ class UnifiClient:
             return []
 
     # ------------------------------------------------------------------
+    # v1 API endpoints (require api_key)
+    # ------------------------------------------------------------------
+
+    def get_fw_policies(self):
+        """Zone-based firewall policies (v1 API).  Returns (policies, zones)."""
+        sid = self._resolve_v1_site()
+        if not sid:
+            return [], []
+        policies = self._get_v1(f"/sites/{sid}/firewall/policies")
+        zones    = self._get_v1(f"/sites/{sid}/firewall/zones")
+        log.debug("get_fw_policies: %d policies, %d zones", len(policies), len(zones))
+        return policies, zones
+
+    def get_dns_policies(self):
+        """DNS / content-filtering policies (v1 API)."""
+        sid = self._resolve_v1_site()
+        if not sid:
+            return []
+        data = self._get_v1(f"/sites/{sid}/dns/policies")
+        log.debug("get_dns_policies: %d policies", len(data))
+        return data
+
+    # ------------------------------------------------------------------
     # Convenience: collect all report data in one call
     # ------------------------------------------------------------------
 
@@ -341,5 +411,9 @@ class UnifiClient:
             "traffic_routes":    _safe("traffic_routes",    self.get_traffic_routes,    []),
             "port_forwards":     _safe("port_forwards",     self.get_port_forwards,     []),
             "wan_stats":         _safe("wan_stats",         self.get_wan_stats,         []),
-            "client_stats":      _safe("client_stats",      self.get_client_stats,      []),
+            "client_stats":        _safe("client_stats",        self.get_client_stats,                                []),
+            "hourly_client_stats": _safe("hourly_client_stats", lambda: self.get_client_stats(hours=24, granularity="hourly"), []),
+            # v1 API (requires api_key in config)
+            "fw_policies":         _safe("fw_policies",         self.get_fw_policies,                             ([], [])),
+            "dns_policies":        _safe("dns_policies",        self.get_dns_policies,                            []),
         }
